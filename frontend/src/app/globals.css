@@ -1,8 +1,27 @@
 @import "tailwindcss";
 
+/* Material UI Color Palette */
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #0f172a;
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --primary-light: #3b82f6;
+  --secondary: #64748b;
+  --accent: #f8fafc;
+  --surface: #ffffff;
+  --surface-variant: #f1f5f9;
+  --border: #e2e8f0;
+  --border-light: #f1f5f9;
+  --shadow: rgba(15, 23, 42, 0.1);
+  --shadow-md: rgba(15, 23, 42, 0.15);
+  --shadow-lg: rgba(15, 23, 42, 0.2);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --success: #10b981;
+  --error: #ef4444;
+  --warning: #f59e0b;
 }
 
 @theme inline {
@@ -12,15 +31,395 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Material UI Typography Scale */
+.text-display-large {
+  font-size: 3.5rem;
+  font-weight: 400;
+  line-height: 1.12;
+  letter-spacing: -0.25px;
+}
+
+.text-display-medium {
+  font-size: 2.8125rem;
+  font-weight: 400;
+  line-height: 1.16;
+}
+
+.text-display-small {
+  font-size: 2.25rem;
+  font-weight: 400;
+  line-height: 1.22;
+}
+
+.text-headline-large {
+  font-size: 2rem;
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+.text-headline-medium {
+  font-size: 1.75rem;
+  font-weight: 400;
+  line-height: 1.29;
+}
+
+.text-headline-small {
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: 1.33;
+}
+
+.text-title-large {
+  font-size: 1.375rem;
+  font-weight: 400;
+  line-height: 1.27;
+}
+
+.text-title-medium {
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0.15px;
+}
+
+.text-title-small {
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.43;
+  letter-spacing: 0.1px;
+}
+
+.text-body-large {
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0.5px;
+}
+
+.text-body-medium {
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.43;
+  letter-spacing: 0.25px;
+}
+
+.text-body-small {
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.33;
+  letter-spacing: 0.4px;
+}
+
+.text-label-large {
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.43;
+  letter-spacing: 0.1px;
+}
+
+.text-label-medium {
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.33;
+  letter-spacing: 0.5px;
+}
+
+.text-label-small {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0.5px;
+}
+
+/* Material UI Elevation System */
+.elevation-0 {
+  box-shadow: none;
+}
+
+.elevation-1 {
+  box-shadow: 0px 1px 3px var(--shadow), 0px 1px 2px var(--shadow);
+}
+
+.elevation-2 {
+  box-shadow: 0px 2px 6px var(--shadow), 0px 1px 2px var(--shadow);
+}
+
+.elevation-3 {
+  box-shadow: 0px 4px 8px var(--shadow-md), 0px 1px 3px var(--shadow);
+}
+
+.elevation-4 {
+  box-shadow: 0px 6px 12px var(--shadow-md), 0px 2px 4px var(--shadow);
+}
+
+.elevation-5 {
+  box-shadow: 0px 8px 16px var(--shadow-lg), 0px 2px 4px var(--shadow);
+}
+
+/* Material UI Components */
+.surface {
+  background-color: var(--surface);
+  color: var(--text-primary);
+}
+
+.surface-variant {
+  background-color: var(--surface-variant);
+  color: var(--text-primary);
+}
+
+.container-filled {
+  background-color: var(--surface-variant);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.container-outlined {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+/* Button Styles */
+.btn-filled {
+  background-color: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-weight: 500;
+  font-size: 0.875rem;
+  line-height: 1.43;
+  letter-spacing: 0.1px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-filled:hover {
+  background-color: var(--primary-dark);
+  box-shadow: var(--elevation-2);
+}
+
+.btn-filled:active {
+  background-color: var(--primary-dark);
+  box-shadow: var(--elevation-1);
+}
+
+.btn-outlined {
+  background-color: transparent;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-weight: 500;
+  font-size: 0.875rem;
+  line-height: 1.43;
+  letter-spacing: 0.1px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-outlined:hover {
+  background-color: rgba(37, 99, 235, 0.04);
+  box-shadow: var(--elevation-1);
+}
+
+.btn-text {
+  background-color: transparent;
+  color: var(--primary);
+  border: none;
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-weight: 500;
+  font-size: 0.875rem;
+  line-height: 1.43;
+  letter-spacing: 0.1px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-text:hover {
+  background-color: rgba(37, 99, 235, 0.04);
+}
+
+/* Input Styles */
+.input-outlined {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  width: 100%;
+}
+
+.input-outlined:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.input-outlined::placeholder {
+  color: var(--text-muted);
+}
+
+/* Card Styles */
+.card {
+  background-color: var(--surface);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: var(--elevation-1);
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.card:hover {
+  box-shadow: var(--elevation-2);
+}
+
+.card-outlined {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.card-outlined:hover {
+  border-color: var(--primary);
+  box-shadow: var(--elevation-1);
+}
+
+/* Utility Classes */
+.text-primary {
+  color: var(--text-primary);
+}
+
+.text-secondary {
+  color: var(--text-secondary);
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.bg-primary {
+  background-color: var(--primary);
+}
+
+.bg-surface {
+  background-color: var(--surface);
+}
+
+.bg-surface-variant {
+  background-color: var(--surface-variant);
+}
+
+/* Responsive Grid */
+.grid-responsive {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 768px) {
+  .grid-responsive {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
+@media (min-width: 1024px) {
+  .grid-responsive {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Animation Classes */
+.fade-in {
+  animation: fadeIn 0.3s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.slide-in-up {
+  animation: slideInUp 0.3s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.scale-in {
+  animation: scaleIn 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Base Styles */
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface-variant);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
