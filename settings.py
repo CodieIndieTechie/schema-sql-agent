@@ -35,14 +35,8 @@ class Settings(BaseSettings):
     environment: str = Field(default="development", description="Application environment")
     debug: bool = Field(default=False, description="Enable debug mode")
     
-    # --- RabbitMQ Configuration ---
-    rabbitmq_host: str = Field(default="localhost", description="RabbitMQ host")
-    rabbitmq_port: int = Field(default=5672, description="RabbitMQ port")
-    rabbitmq_user: str = Field(default="guest", description="RabbitMQ username")
-    rabbitmq_password: str = Field(default="guest", description="RabbitMQ password")
-    rabbitmq_vhost: str = Field(default="/", description="RabbitMQ virtual host")
+    # --- Task Configuration ---
     task_timeout: int = Field(default=300, description="Task timeout in seconds")
-    rabbitmq_url: str = Field(default="amqp://guest:guest@localhost/", description="RabbitMQ URL")
     
     # --- Frontend Configuration ---
     frontend_host: str = Field(default="localhost", description="Frontend host")

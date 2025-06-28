@@ -2,7 +2,8 @@
 """
 Multi-Tenant SQL Agent Startup Script
 
-Launches the multi-tenant FastAPI backend, RabbitMQ worker, and Next.js frontend servers.
+Launches the multi-tenant FastAPI backend and Next.js frontend servers.
+Note: Celery workers should be started separately for production.
 """
 
 import subprocess
@@ -11,7 +12,7 @@ import time
 import os
 import signal
 from pathlib import Path
-from multiprocessing import Process
+
 
 # Import settings for dynamic URLs
 from settings import Settings
@@ -19,12 +20,9 @@ from settings import Settings
 # Initialize settings
 settings = Settings()
 
-# Import RabbitMQ worker functionality
-try:
-    from venv_async_processor import start_worker
-except ImportError:
-    print("⚠️ RabbitMQ tasks module not found. Async processing will not be available.")
-    start_worker = None
+# Note: Celery workers should be started separately
+# Use: python start_celery_worker.py
+print("ℹ️ Note: Start Celery workers separately with 'python start_celery_worker.py'")
 
 
 def check_dependencies():
@@ -125,18 +123,7 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 
-def start_rabbitmq_worker_process():
-    """Start the RabbitMQ worker in a separate process."""
-    if start_worker is None:
-        print("⚠️ RabbitMQ worker not available. Async processing will be handled in-process.")
-        return None
-        
-    print("🔄 Starting RabbitMQ worker...")
-    worker_process = Process(target=start_worker)
-    worker_process.daemon = True
-    worker_process.start()
-    print("✅ RabbitMQ worker started")
-    return worker_process
+
 
 
 def main():
@@ -154,9 +141,7 @@ def main():
     if not check_frontend_dependencies():
         sys.exit(1)
     
-    # Start RabbitMQ worker first (if available)
-    worker_process = start_rabbitmq_worker_process()
-    time.sleep(1)  # Give worker time to start
+    # Celery workers should be started separately
     
     # Start servers
     backend_process = start_backend()

@@ -13,7 +13,7 @@ import logging
 from typing import List, Optional, Any, Union
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header, BackgroundTasks
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -32,7 +32,7 @@ from user_service import main_user_service, get_or_create_session_from_user, Use
 from auth_service import get_current_user, User
 from auth_endpoints import include_auth_routes
 from multi_sheet_uploader import MultiSheetExcelUploader
-from venv_async_processor import VenvAsyncProcessor
+from celery_tasks import create_file_processing_task, get_task_status
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -128,15 +128,9 @@ async def startup_event():
     print(f"🔗 API documentation: {settings.api_docs_url}")
     print(f"🔗 API endpoint: {settings.api_base_url}")
     
-    # Start the async worker
-    try:
-        from venv_async_processor import processor
-        processor.start_worker()
-        logger.info("✅ Async worker started successfully")
-        print("🔄 Async file processor worker started")
-    except Exception as e:
-        logger.error(f"❌ Failed to start async worker: {e}")
-        print(f"⚠️ Warning: Async worker failed to start: {e}")
+    # Celery workers should be started separately
+    print("🔄 Celery task queue ready (start workers with: celery -A celery_config worker)")
+    print("📊 Celery monitoring available with: celery -A celery_config flower")
 
 # Global services
 from user_service import main_user_service
@@ -421,8 +415,8 @@ async def upload_files(
                 temp_file.close()
                 temp_files.append(temp_file.name)
 
-            # Create async processing task with email and database name
-            task_id = VenvAsyncProcessor().create_task(temp_files, current_user.email, current_user.database_name)
+            # Create Celery task for file processing
+            task_id = create_file_processing_task(temp_files, current_user.email, current_user.database_name)
 
             return {
                 "success": True,
@@ -448,8 +442,8 @@ async def upload_files(
 @app.get("/task-status/{task_id}", response_model=TaskStatusResponse)
 async def get_task_status_api(task_id: str):
     """Get the status of a background task."""
-    status = VenvAsyncProcessor().get_task_status(task_id)
-    if not status or status.get("state") == "NOT_FOUND":
+    status = get_task_status(task_id)
+    if not status or status.get("status") == "error":
         raise HTTPException(status_code=404, detail="Task not found")
     return status
 
