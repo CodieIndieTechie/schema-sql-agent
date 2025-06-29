@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     db_port: int = Field(default=5432, description="Database port")
     db_name: str = Field(default="postgres", description="Database name")
     
+    # --- Schema-per-Tenant Configuration (Primary Architecture) ---
+    portfoliosql_db_name: str = Field(default="portfoliosql", description="Central database for schema-per-tenant architecture")
+    max_chat_history_messages: int = Field(default=100, description="Maximum chat history messages per session")
+    
     # --- LLM Configuration ---
     openai_api_key: str = Field(..., description="OpenAI API key for LLM access")
     
@@ -144,8 +148,13 @@ class Settings(BaseSettings):
     
     @property
     def default_database_uri(self) -> str:
-        """Default database URI for backward compatibility."""
-        return self.get_database_uri(self.db_name)
+        """Default database URI - points to portfoliosql for schema-per-tenant."""
+        return self.portfoliosql_database_uri
+    
+    @property
+    def portfoliosql_database_uri(self) -> str:
+        """Central portfoliosql database URI for schema-per-tenant architecture."""
+        return self.get_database_uri(self.portfoliosql_db_name)
     
     @property
     def api_base_url(self) -> str:
@@ -174,51 +183,51 @@ class Settings(BaseSettings):
             return self.google_redirect_uri
         return f"{self.api_base_url}/auth/google/callback"
     
-    def list_available_databases(self) -> list[str]:
-        """List all available databases in the PostgreSQL server."""
+    def list_user_schemas(self) -> list[str]:
+        """List all user schemas in the portfoliosql database."""
         try:
-            # Connect to the default database to list all databases
+            # Connect to portfoliosql database to list schemas
             conn = psycopg2.connect(
                 host=self.db_host,
                 port=self.db_port,
                 user=self.db_user,
                 password=self.db_password,
-                database=self.db_name
+                database=self.portfoliosql_db_name
             )
             
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT datname 
-                FROM pg_database 
-                WHERE datistemplate = false 
-                AND datname NOT IN ('postgres', 'template0', 'template1')
-                ORDER BY datname;
+                SELECT schema_name 
+                FROM information_schema.schemata 
+                WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast', 'public')
+                AND schema_name LIKE 'user_%'
+                ORDER BY schema_name;
             """)
             
-            databases = [row[0] for row in cursor.fetchall()]
+            schemas = [row[0] for row in cursor.fetchall()]
             cursor.close()
             conn.close()
             
             if self.debug:
-                print(f"📊 Available databases: {databases}")
+                print(f"📊 Available user schemas: {schemas}")
             
-            return databases
+            return schemas
             
         except Exception as e:
             if self.debug:
-                print(f"❌ Error listing databases: {e}")
+                print(f"❌ Error listing schemas: {e}")
             return []
     
-    def get_database_connection(self, db_name: str):
-        """Create a SQLAlchemy engine for a specific database."""
+    def get_portfoliosql_connection(self):
+        """Create a SQLAlchemy engine for the portfoliosql database."""
         try:
-            engine = create_engine(self.get_database_uri(db_name))
+            engine = create_engine(self.portfoliosql_database_uri)
             if self.debug:
-                print(f"🔗 Connected to database: {db_name}")
+                print(f"🔗 Connected to portfoliosql database")
             return engine
         except Exception as e:
             if self.debug:
-                print(f"❌ Error connecting to database {db_name}: {e}")
+                print(f"❌ Error connecting to portfoliosql database: {e}")
             raise
 
 
@@ -235,9 +244,13 @@ DEFAULT_DB_NAME = settings.db_name
 DATABASE_URI = settings.default_database_uri
 LANGCHAIN_PROJECT = settings.langchain_project
 
-# Function exports for backward compatibility
+# Function exports for schema-per-tenant
+def get_portfoliosql_uri() -> str:
+    """Get the portfoliosql database URI."""
+    return settings.portfoliosql_database_uri
+
 def get_database_uri(db_name: str) -> str:
-    """Create a database URI for a specific database."""
+    """Create a database URI for a specific database (legacy compatibility)."""
     return settings.get_database_uri(db_name)
 
 def list_available_databases() -> list[str]:
@@ -247,3 +260,7 @@ def list_available_databases() -> list[str]:
 def get_database_connection(db_name: str):
     """Create a SQLAlchemy engine for a specific database."""
     return settings.get_database_connection(db_name)
+
+def get_portfoliosql_connection():
+    """Create a SQLAlchemy engine for the portfoliosql database."""
+    return settings.get_portfoliosql_connection()

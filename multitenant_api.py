@@ -28,8 +28,11 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
 
 from settings import settings
-from user_service import main_user_service, get_or_create_session_from_user, UserSession
+from schema_user_service import schema_user_service
 from auth_service import get_current_user, User
+from schema_dependencies import (
+    get_db_session_with_schema, get_user_schema_info, ensure_user_schema
+)
 from auth_endpoints import include_auth_routes
 from multi_sheet_uploader import MultiSheetExcelUploader
 from celery_tasks import create_file_processing_task, get_task_status
@@ -41,7 +44,7 @@ logger = logging.getLogger(__name__)
 # Pydantic models for request/response
 class UserSessionResponse(BaseModel):
     user_id: str
-    database_name: str
+    schema: str
     created_at: str
     message_count: int
     table_count: int
@@ -55,7 +58,7 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     response: str
     user_id: str
-    database_name: str
+    schema: str
     success: bool
     error: Optional[str] = None
 
@@ -63,6 +66,8 @@ class QueryResponse(BaseModel):
 class UploadResponse(BaseModel):
     success: bool
     message: str
+    task_id: str
+    schema: str
     tables_created: List[str]
     total_rows: int
     sheets_processed: int
@@ -79,7 +84,7 @@ class TableInfo(BaseModel):
 
 class UserTablesResponse(BaseModel):
     user_id: str
-    database_name: str
+    schema: str
     tables: List[TableInfo]
 
 
@@ -133,10 +138,8 @@ async def startup_event():
     print("📊 Celery monitoring available with: celery -A celery_config flower")
 
 # Global services
-from user_service import main_user_service
 from multi_sheet_uploader import MultiSheetExcelUploader
 
-user_service = main_user_service
 uploader = MultiSheetExcelUploader()
 
 # Store SQL agents per user
@@ -171,42 +174,16 @@ def clear_session_history(session_id: str) -> bool:
         return True
     return False
 
-def get_user_session(user_id: str = None) -> UserSession:
-    """Get or create user session."""
-    if user_id:
-        session = user_service.get_user_session(user_id)
-        if session:
-            return session
-    
-    # Create new session
-    return user_service.create_user_session()
-
-
-def get_sql_agent(user_session: UserSession):
-    """Get or create SQL agent for user."""
-    user_id = user_session.user_id
-    
-    if user_id not in sql_agents:
-        try:
-            agent_executor = create_multitenant_sql_agent(user_session.database_name)
-            sql_agents[user_id] = agent_executor
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to create SQL agent: {str(e)}")
-    
-    return sql_agents[user_id]
+# Note: User sessions now managed through schema_user_service
+# Individual user session management removed as part of schema-per-tenant simplification
 
 
 # SQL Agent creation function
-def create_multitenant_sql_agent(database_name: str) -> AgentExecutor:
-    """Create a SQL agent with dual database access (user + portfolio)."""
+def create_multitenant_sql_agent(database_uri: str, schema_name: str = None) -> AgentExecutor:
+    """Create a SQL agent for schema-per-tenant architecture."""
     try:
-        # Create database connection for the specific user database
-        user_database_uri = f"postgresql://{settings.encoded_db_user}:{settings.encoded_db_password}@{settings.db_host}:{settings.db_port}/{database_name}"
-        user_db = SQLDatabase.from_uri(user_database_uri)
-        
-        # Create database connection for the portfolio database
-        portfolio_database_uri = f"postgresql://{settings.encoded_db_user}:{settings.encoded_db_password}@{settings.db_host}:{settings.db_port}/portfoliosql"
-        portfolio_db = SQLDatabase.from_uri(portfolio_database_uri)
+        # Create database connection with schema-specific search path
+        db = SQLDatabase.from_uri(database_uri)
         
         # Initialize OpenAI LLM
         llm = ChatOpenAI(
@@ -215,55 +192,31 @@ def create_multitenant_sql_agent(database_name: str) -> AgentExecutor:
             openai_api_key=settings.openai_api_key
         )
         
-        # Create tools for both databases
+        # Create SQL toolkit for the user's schema
         from langchain_community.agent_toolkits.sql.toolkit import SQLDatabaseToolkit
         
-        # User database tools (for uploaded data)
-        user_toolkit = SQLDatabaseToolkit(db=user_db, llm=llm)
-        user_tools = user_toolkit.get_tools()
+        toolkit = SQLDatabaseToolkit(db=db, llm=llm)
+        tools = toolkit.get_tools()
         
-        # Portfolio database tools (for shared financial data)
-        portfolio_toolkit = SQLDatabaseToolkit(db=portfolio_db, llm=llm)
-        portfolio_tools = portfolio_toolkit.get_tools()
-        
-        # Rename tools to distinguish between databases
-        for tool in user_tools:
-            tool.name = f"user_db_{tool.name}"
-            tool.description = f"For personal uploaded data: {tool.description}"
-            
-        for tool in portfolio_tools:
-            tool.name = f"portfolio_db_{tool.name}"
-            tool.description = f"For portfolio/financial data (stocks, bonds, mutual_funds, etc.): {tool.description}"
-        
-        # Combine all tools
-        all_tools = user_tools + portfolio_tools
-        
-        # Enhanced system prompt for dual database routing with modern structure
-        system_prompt = """You are a helpful SQL expert assistant with access to two databases:
+        # System prompt for schema-per-tenant architecture
+        system_prompt = f"""You are a helpful SQL expert assistant with access to a PostgreSQL database.
 
-1. **Personal Database** (user_db_*): Contains the user's uploaded data files
-2. **Portfolio Database** (portfolio_db_*): Contains shared financial data (stocks, bonds, mutual funds, ETFs, real estate, portfolio analysis)
+You are working with the user's personal schema{f' ({schema_name})' if schema_name else ''} which contains their uploaded data files and tables.
 
-**Database Selection Rules:**
-- For questions about FINANCIAL/INVESTMENT data (stocks, bonds, mutual funds, ETFs, real estate, portfolio analysis): Use portfolio_db_* tools
-- For questions about UPLOADED USER DATA (Excel/CSV files they uploaded): Use user_db_* tools
-- When in doubt, start with portfolio_db_* for financial terms, user_db_* for personal data
+**IMPORTANT - Query Guidelines:**
+1. Be efficient: Use the minimum number of tool calls needed to answer the question
+2. First check available tables with sql_db_list_tables if needed
+3. Then query the data with sql_db_query, limiting results to 5 rows unless specified
+4. Provide your final answer immediately after getting the query results
+5. Don't repeatedly query the same information
+6. If you get an error, try a simpler approach instead of complex workarounds
 
-**Query Guidelines:**
-1. Always identify which database to query based on the question context
-2. Use appropriate database tools (user_db_* or portfolio_db_*)
-3. Execute the tools and provide the actual results
-4. If data isn't found in one database, try the other if it makes sense
-5. Always mention which database you're querying for transparency
-6. Unless the user specifies a specific number of examples, always limit your query to at most 5 results
-7. You can order the results by a relevant column to return the most interesting examples
+**Response Format:**
+- Execute necessary tools to get the data
+- Provide a clear, concise answer based on the results
+- Stop after providing the answer - don't ask follow-up questions
 
-Examples:
-- "List mutual funds" → Use portfolio_db_list_tables and portfolio_db_query_sql to get actual results
-- "Show my uploaded sales data" → Use user_db_list_tables and user_db_query_sql to get actual results
-- "What tables do I have?" → Use user_db_list_tables to show actual table names
-
-Remember: Always execute the tools to get real data, don't just show function calls. Only use the given tools and only use information returned by the tools to construct your final answer."""
+Remember: Be direct and efficient. Answer the user's question with the data you retrieve, then stop."""
         
         # Create modern prompt structure with chat history support
         prompt = ChatPromptTemplate.from_messages([
@@ -274,16 +227,17 @@ Remember: Always execute the tools to get real data, don't just show function ca
         ])
         
         # Create modern tool-calling agent
-        agent = create_tool_calling_agent(llm, all_tools, prompt)
+        agent = create_tool_calling_agent(llm, tools, prompt)
         
         # Create agent executor with enhanced capabilities
         agent_executor = AgentExecutor(
             agent=agent,
-            tools=all_tools,
+            tools=tools,
             verbose=False,  # Set to True for debugging
             handle_parsing_errors=True,
-            max_iterations=10,
-            early_stopping_method="force",
+            max_iterations=15,  # Increased from 10 to 15
+            max_execution_time=60,  # 60 second timeout
+            early_stopping_method="generate",  # Changed from "force" to "generate"
             return_intermediate_steps=True,  # Enable for better debugging and evaluation
         )
         
@@ -311,83 +265,65 @@ async def root():
 async def health_check():
     """Health check endpoint."""
     try:
-        # Check user service
-        stats = user_service.get_session_stats()
+        # Check portfoliosql database connection
+        from settings import get_portfoliosql_connection
+        engine = get_portfoliosql_connection()
+        with engine.connect() as conn:
+            conn.execute("SELECT 1")
         
         return {
             "status": "healthy",
             "service": "multi-tenant-sql-agent",
-            "active_sessions": stats["active_sessions"],
-            "user_databases": len(user_service.list_user_databases())
+            "architecture": "schema-per-tenant",
+            "database": "portfoliosql",
+            "active_sql_agents": len(sql_agents)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
 
 
-@app.post("/session/new", response_model=UserSessionResponse)
-async def create_new_session():
-    """Create a new user session with dedicated database."""
-    try:
-        session = user_service.create_user_session()
-        
-        return UserSessionResponse(
-            user_id=session.user_id,
-            database_name=session.database_name,
-            created_at=session.created_at.isoformat(),
-            message_count=len(session.message_history),
-            table_count=len(session.uploaded_tables)
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create session: {str(e)}")
+# Legacy session endpoints removed - using schema-per-tenant architecture
 
 
-@app.get("/session/{user_id}", response_model=UserSessionResponse)
-async def get_session_info(user_id: str):
-    """Get information about a user session."""
-    session = user_service.get_user_session(user_id)
-    
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found or expired")
-    
-    return UserSessionResponse(
-        user_id=session.user_id,
-        database_name=session.database_name,
-        created_at=session.created_at.isoformat(),
-        message_count=len(session.message_history),
-        table_count=len(session.uploaded_tables)
-    )
-
-
-@app.post("/query")
+@app.post("/query", response_model=QueryResponse)
 async def query_database(
     request: QueryRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db_session = Depends(get_db_session_with_schema)
 ):
-    """Process natural language query for authenticated user."""
+    """Process natural language query for authenticated user using schema-per-tenant architecture."""
     try:
-        # Get user session from authenticated user
-        session = get_or_create_session_from_user(current_user)
+        # Ensure user schema exists
+        ensure_user_schema(current_user.email)
         
-        # Get or create SQL agent for this user's database
+        # Get user session from schema user service
+        session = schema_user_service.create_session_from_email(current_user.email, current_user.name)
+        
+        # Get or create SQL agent for this user's schema in portfoliosql
+        # Use the same schema name logic as SchemaUserSession
+        from schema_migration import email_to_schema_name
+        schema_name = email_to_schema_name(current_user.email)
+        
         if current_user.email not in sql_agents:
-            sql_agents[current_user.email] = create_multitenant_sql_agent(current_user.database_name)
+            # Create agent with schema-specific database connection using SchemaUserSession's db_uri
+            db_uri = session.db_uri
+            sql_agents[current_user.email] = create_multitenant_sql_agent(db_uri, schema_name=schema_name)
         
         agent_with_history = sql_agents[current_user.email]
         
-        # Process the query with session history
+        # Process the query with LangChain's built-in chat history
         result = agent_with_history.invoke(
             {"input": request.query},
             config={"configurable": {"session_id": current_user.email}}
         )
         
-        return {
-            "success": True,
-            "user_email": current_user.email,
-            "database": current_user.database_name,
-            "query": request.query,
-            "response": result["output"],
-            "intermediate_steps": result.get("intermediate_steps", []) if settings.debug else None
-        }
+        return QueryResponse(
+            success=True,
+            user_id=current_user.email,
+            schema=schema_name,
+            response=result["output"],
+            error=None
+        )
         
     except Exception as e:
         logger.error(f"Query processing failed for user {current_user.email}: {str(e)}")
@@ -397,12 +333,19 @@ async def query_database(
 @app.post("/upload-files")
 async def upload_files(
     files: List[UploadFile] = File(...),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db_session = Depends(get_db_session_with_schema)
 ):
-    """Upload and process Excel/CSV files for authenticated user."""
+    """Upload and process Excel/CSV files for authenticated user using schema-per-tenant architecture."""
     try:
-        # Get or create user session from authenticated user
-        session = get_or_create_session_from_user(current_user)
+        # Ensure user schema exists
+        ensure_user_schema(current_user.email)
+        
+        # Get user session from schema user service
+        session = schema_user_service.create_session_from_email(current_user.email, current_user.name)
+        
+        # Use portfoliosql database with user's schema
+        schema_name = f"user_{current_user.email.replace('@', '_').replace('.', '_')}"
         
         # Save uploaded files temporarily
         temp_files = []
@@ -416,15 +359,14 @@ async def upload_files(
                 temp_files.append(temp_file.name)
 
             # Create Celery task for file processing
-            task_id = create_file_processing_task(temp_files, current_user.email, current_user.database_name)
+            task_id = create_file_processing_task(temp_files, current_user.email)
 
             return {
                 "success": True,
-                "message": f"Files uploaded successfully. Processing {len(files)} files in background.",
+                "message": "Files uploaded successfully and are being processed",
                 "task_id": task_id,
-                "files_count": len(files),
-                "user_email": current_user.email,
-                "database": current_user.database_name
+                "schema": schema_name,
+                "user_email": current_user.email
             }
 
         except Exception as e:
@@ -517,16 +459,20 @@ async def upload_files_sync(
 async def get_user_tables(current_user: User = Depends(get_current_user)):
     """Get tables for the authenticated user."""
     try:
-        # Get user session
-        session = get_or_create_session_from_user(current_user)
+        # Ensure user schema exists
+        ensure_user_schema(current_user.email)
         
-        # Get table list from database
+        # Get user session from schema user service
+        session = schema_user_service.create_session_from_email(current_user.email, current_user.name)
+        
+        # Get table list from schema
         tables = session.list_tables()
+        schema_name = f"user_{current_user.email.replace('@', '_').replace('.', '_')}"
         
         return {
             "success": True,
             "user_email": current_user.email,
-            "database": current_user.database_name,
+            "database": f"portfoliosql (schema: {schema_name})",
             "tables": tables,
             "table_count": len(tables)
         }
@@ -536,62 +482,7 @@ async def get_user_tables(current_user: User = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"Failed to get tables: {str(e)}")
 
 
-@app.get("/user/{user_id}/databases")
-async def get_user_databases(user_id: str):
-    """Get list of databases available to a user."""
-    session = user_service.get_user_session(user_id)
-    
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found or expired")
-    
-    try:
-        # Check if portfoliosql database exists
-        portfolio_available = False
-        try:
-            from settings import get_database_connection
-            portfolio_engine = get_database_connection("portfoliosql")
-            with portfolio_engine.connect() as conn:
-                conn.execute("SELECT 1")
-            portfolio_available = True
-        except Exception:
-            portfolio_available = False
-        
-        # Check if user database exists
-        user_db_available = False
-        try:
-            user_engine = get_database_connection(session.database_name)
-            with user_engine.connect() as conn:
-                conn.execute("SELECT 1")
-            user_db_available = True
-        except Exception:
-            user_db_available = False
-        
-        databases = []
-        
-        if portfolio_available:
-            databases.append({
-                "name": "portfoliosql",
-                "type": "shared",
-                "description": "Shared portfolio and financial data",
-                "available": True
-            })
-        
-        if user_db_available:
-            databases.append({
-                "name": session.database_name,
-                "type": "personal",
-                "description": "Personal database for uploaded Excel/CSV files",
-                "available": True
-            })
-        
-        return {
-            "user_id": user_id,
-            "databases": databases,
-            "total_count": len(databases)
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to check databases: {str(e)}")
+# Legacy endpoint removed - using schema-per-tenant only
 
 
 @app.get("/user/{user_id}/history")
@@ -639,40 +530,45 @@ async def clear_user_history(user_id: str):
 
 @app.get("/admin/sessions")
 async def get_all_sessions():
-    """Get statistics about all active sessions (admin endpoint)."""
+    """Get statistics about active SQL agents (admin endpoint)."""
     try:
-        stats = user_service.get_session_stats()
-        return stats
+        return {
+            "active_sql_agents": len(sql_agents),
+            "agent_users": list(sql_agents.keys()),
+            "architecture": "schema-per-tenant"
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get session stats: {str(e)}")
 
 
 @app.get("/admin/databases")
 async def get_user_databases():
-    """Get list of all user databases (admin endpoint)."""
+    """Get database info for schema-per-tenant architecture (admin endpoint)."""
     try:
-        databases = user_service.list_user_databases()
-        return {"user_databases": databases}
+        from settings import get_portfoliosql_connection
+        engine = get_portfoliosql_connection()
+        return {
+            "database": "portfoliosql",
+            "architecture": "schema-per-tenant",
+            "active_schemas": len(sql_agents),
+            "database_url": str(engine.url).replace(engine.url.password, "***")
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get databases: {str(e)}")
 
 
 @app.delete("/admin/session/{user_id}")
 async def delete_user_session(user_id: str):
-    """Delete a user session (admin endpoint)."""
+    """Delete a user SQL agent (admin endpoint)."""
     try:
-        session = user_service.get_user_session(user_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
-        # Remove from active sessions
-        user_service.cleanup_session(user_id)
+        if user_id not in sql_agents:
+            raise HTTPException(status_code=404, detail="SQL agent not found")
         
         # Remove SQL agent
         if user_id in sql_agents:
             del sql_agents[user_id]
         
-        return {"message": f"Session {user_id} deleted successfully"}
+        return {"message": f"SQL agent for {user_id} deleted successfully"}
         
     except HTTPException:
         raise
@@ -688,13 +584,13 @@ def create_sample_evaluation_questions():
     """
     return [
         "How many tables do I have?",
-        "What financial data is available in the portfolio database?",
-        "List all mutual funds with their performance metrics",
-        "Show me the top 5 performing stocks",
-        "What data did I upload recently?",
-        "Compare bond performance vs stock performance",
-        "What are the different asset classes available?",
-        "Show my portfolio allocation by asset type"
+        "What data did I upload?",
+        "Show me the structure of my tables",
+        "List the first 5 rows from my data",
+        "What columns are available in my tables?",
+        "Show me a summary of my uploaded data",
+        "What types of data do I have?",
+        "Show me sample records from each table"
     ]
 
 @app.get("/admin/evaluate")
@@ -715,8 +611,11 @@ async def evaluate_agent_capability():
             agent_key = list(sql_agents.keys())[0]
             agent_with_history = sql_agents[agent_key]
         else:
-            # Create a default agent for evaluation
-            agent_with_history = create_multitenant_sql_agent("default_eval_db")
+            # Create a default agent for evaluation using portfoliosql
+            from settings import get_portfoliosql_connection
+            engine = get_portfoliosql_connection()
+            db_uri = str(engine.url)
+            agent_with_history = create_multitenant_sql_agent(db_uri, schema_name="eval_schema")
         
         for i, question in enumerate(sample_questions):
             try:
@@ -756,6 +655,23 @@ async def evaluate_agent_capability():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
+
+
+# Schema information endpoint
+@app.get("/user/schema-info")
+async def get_user_schema_info_endpoint(
+    current_user: User = Depends(get_current_user)
+):
+    """Get schema information for the current user."""
+    try:
+        schema_info = get_user_schema_info(current_user.email)
+        return {
+            **schema_info,
+            "architecture": "schema-per-tenant"
+        }
+    except Exception as e:
+        logger.error(f"Error getting schema info for {current_user.email}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting schema info: {str(e)}")
 
 
 include_auth_routes(app)

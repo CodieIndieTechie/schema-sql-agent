@@ -38,6 +38,21 @@ ENV/
 .idea/
 *.swp
 *.swo
+
+# Generated files
+celerybeat-schedule
+celerybeat.pid
+*.log
+*.json
+
+# Test and temp files
+test_*
+*_test.py
+*_temp.py
+validate_*
+verify_*
+evaluate_*
+initialization_results.*
 *~
 
 # OS

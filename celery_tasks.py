@@ -18,7 +18,6 @@ from celery import Task
 from celery.exceptions import Retry, WorkerLostError
 from celery_config import celery_app
 from multi_sheet_uploader import MultiSheetExcelUploader
-from user_service import UserService
 from auth_service import get_current_user
 
 # Configure logging
@@ -41,37 +40,40 @@ class CallbackTask(Task):
     retry_kwargs={'max_retries': 3, 'countdown': 60},
     name='celery_tasks.process_file_upload'
 )
-def process_file_upload(self, files: List[str], email: str, database_name: str) -> Dict[str, Any]:
+def process_file_upload(self, files: List[str], email: str) -> Dict[str, Any]:
     """
-    Process uploaded files and create database tables
+    Process uploaded files and create database tables in user's schema.
     
     Args:
         files: List of file paths to process
-        email: User email for identification
-        database_name: Target database name
+        email: User email
         
     Returns:
-        Dict with processing results
+        Dictionary with processing results
     """
     try:
         logger.info(f"Starting file processing task for user {email}")
         
-        # Initialize services
-        user_service = UserService()
+        # Initialize services for schema-per-tenant architecture
+        from schema_user_service import SchemaUserService
+        from schema_migration import SchemaPerTenantDB
+        
+        schema_user_service = SchemaUserService()
+        schema_manager = SchemaPerTenantDB()
         uploader = MultiSheetExcelUploader()
         
-        # Ensure user exists and get user info
-        user_info = user_service.get_or_create_user(email)
-        user_id = user_info['id']
+        # Ensure user schema exists and get user info
+        schema_manager.create_tenant_and_schema(email, email.split('@')[0])
+        user_session_obj = schema_user_service.create_session_from_email(email, email.split('@')[0])
+        user_id = user_session_obj.email  # Use email as user identifier
         
-        # Create user database if it doesn't exist
-        user_service.create_user_database(user_id)
+        schema_name = f"user_{email.replace('@', '_').replace('.', '_')}"
         
         result = {
             'task_id': self.request.id,
             'status': 'processing',
             'email': email,
-            'database_name': database_name,
+            'schema': schema_name,
             'files_processed': [],
             'tables_created': [],
             'total_rows': 0,
@@ -91,11 +93,21 @@ def process_file_upload(self, files: List[str], email: str, database_name: str) 
                 logger.info(f"Processing file: {file_path}")
                 
                 # Process the file using MultiSheetExcelUploader
-                file_result = uploader.process_file(
-                    file_path=file_path,
-                    user_id=user_id,
-                    database_name=database_name
-                )
+                # Create user session using SchemaUserSession
+                from schema_user_service import SchemaUserSession
+                try:
+                    user_session = SchemaUserSession(email=email)
+                    logger.info(f"Created user session for: {email} with schema: {user_session.schema_name}")
+                    
+                    file_result = uploader.upload_file_with_sheets(
+                        file_path=file_path,
+                        user_session=user_session
+                    )
+                except Exception as session_error:
+                    error_msg = f"Failed to create user session for {email}: {str(session_error)}"
+                    result['errors'].append(error_msg)
+                    logger.error(error_msg)
+                    continue
                 
                 if file_result.get('success'):
                     result['files_processed'].append(file_path)
@@ -320,14 +332,12 @@ def health_check(self) -> Dict[str, Any]:
         }
 
 # Compatibility functions for existing code
-def create_file_processing_task(files: List[str], email: str, database_name: str) -> str:
+def create_file_processing_task(files: List[str], email: str) -> str:
     """
-    Create and queue a file processing task
-    
-    Returns:
-        Task ID
+    Create a file processing task.
     """
-    task = process_file_upload.delay(files, email, database_name)
+    logger.info(f"Creating file processing task for {len(files)} files for user {email}")
+    task = process_file_upload.delay(files, email)
     return task.id
 
 def get_task_status(task_id: str) -> Dict[str, Any]:

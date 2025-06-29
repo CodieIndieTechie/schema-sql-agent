@@ -15,8 +15,8 @@ from typing import Dict, List, Any, Optional, Tuple
 import re
 from openpyxl import load_workbook
 
-from settings import get_database_connection
-from user_service import UserSession
+# get_database_connection removed - using schema-per-tenant connections
+from schema_user_service import SchemaUserSession as UserSession
 
 
 class MultiSheetExcelUploader:
@@ -196,8 +196,9 @@ class MultiSheetExcelUploader:
                     'error': f'Unsupported file format: {file_ext}'
                 }
             
-            # Get database connection
-            engine = get_database_connection(user_session.database_name)
+            # Get schema-per-tenant database connection
+            from sqlalchemy import create_engine
+            engine = create_engine(user_session.db_uri)
             
             # Get all sheets in the file
             sheet_names = self.get_excel_sheets(file_path)
@@ -369,7 +370,8 @@ class MultiSheetExcelUploader:
             List of table information
         """
         try:
-            engine = get_database_connection(user_session.database_name)
+            from sqlalchemy import create_engine
+            engine = create_engine(user_session.db_uri)
             inspector = inspect(engine)
             
             tables = []
