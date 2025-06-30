@@ -218,6 +218,54 @@ class Settings(BaseSettings):
                 print(f"❌ Error listing schemas: {e}")
             return []
     
+    def list_available_databases(self) -> list[str]:
+        """List all available databases in the PostgreSQL server."""
+        try:
+            # Connect to the default database to list all databases
+            conn = psycopg2.connect(
+                host=self.db_host,
+                port=self.db_port,
+                user=self.db_user,
+                password=self.db_password,
+                database=self.db_name
+            )
+            
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT datname 
+                FROM pg_database 
+                WHERE datistemplate = false 
+                AND datname NOT IN ('postgres', 'template0', 'template1')
+                ORDER BY datname;
+            """)
+            
+            databases = [row[0] for row in cursor.fetchall()]
+            cursor.close()
+            conn.close()
+            
+            if self.debug:
+                print(f"📊 Available databases: {databases}")
+            
+            return databases
+            
+        except Exception as e:
+            if self.debug:
+                print(f"❌ Error listing databases: {e}")
+            return []
+    
+    def get_database_connection(self, db_name: str):
+        """Create a SQLAlchemy engine for a specific database."""
+        try:
+            db_uri = self.get_database_uri(db_name)
+            engine = create_engine(db_uri)
+            if self.debug:
+                print(f"🔗 Connected to database: {db_name}")
+            return engine
+        except Exception as e:
+            if self.debug:
+                print(f"❌ Error connecting to database {db_name}: {e}")
+            raise
+    
     def get_portfoliosql_connection(self):
         """Create a SQLAlchemy engine for the portfoliosql database."""
         try:

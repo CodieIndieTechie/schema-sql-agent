@@ -10,8 +10,12 @@ import os
 import uuid
 import tempfile
 import logging
+from datetime import datetime
 from typing import List, Optional, Any, Union
 from pathlib import Path
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,6 +40,9 @@ from schema_dependencies import (
 from auth_endpoints import include_auth_routes
 from multi_sheet_uploader import MultiSheetExcelUploader
 from celery_tasks import create_file_processing_task, get_task_status
+from enhanced_sql_agent import create_enhanced_user_agent, EnhancedMultiDatabaseSQLAgent
+from database_discovery import discovery_service
+from api.multi_agent_api import router as multi_agent_router
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -142,15 +149,15 @@ from multi_sheet_uploader import MultiSheetExcelUploader
 
 uploader = MultiSheetExcelUploader()
 
-# Store SQL agents per user
-sql_agents = {}
+# Store Enhanced SQL agents per user
+enhanced_sql_agents = {}
 
 # Function to invalidate a user's SQL agent
 def invalidate_user_agent(user_id: str):
     """Invalidate a user's SQL agent so it will be recreated with new tables."""
-    if user_id in sql_agents:
-        del sql_agents[user_id]
-        print(f"✅ Invalidated SQL agent for user: {user_id}")
+    if user_id in enhanced_sql_agents:
+        del enhanced_sql_agents[user_id]
+        print(f"✅ Invalidated enhanced SQL agent for user: {user_id}")
 
 # In-memory store for session histories.
 session_histories = {}
@@ -262,24 +269,41 @@ async def root():
 
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint."""
+def health_check():
+    """Health check endpoint with enhanced agent statistics."""
     try:
-        # Check portfoliosql database connection
-        from settings import get_portfoliosql_connection
-        engine = get_portfoliosql_connection()
-        with engine.connect() as conn:
-            conn.execute("SELECT 1")
+        # Test database connection
+        from schema_migration import schema_db
+        with schema_db.get_session() as session:
+            session.execute(text("SELECT 1"))
+        
+        # Get database discovery summary
+        try:
+            available_databases = discovery_service.list_available_databases()
+            db_count = len(available_databases)
+        except Exception:
+            available_databases = []
+            db_count = 0
         
         return {
             "status": "healthy",
-            "service": "multi-tenant-sql-agent",
-            "architecture": "schema-per-tenant",
-            "database": "portfoliosql",
-            "active_sql_agents": len(sql_agents)
+            "timestamp": datetime.now().isoformat(),
+            "service": "enhanced-multi-database-sql-agent",
+            "version": "3.0.0",
+            "database": "connected",
+            "active_enhanced_agents": len(enhanced_sql_agents),
+            "available_databases": db_count,
+            "database_names": available_databases,
+            "features": [
+                "dynamic_database_discovery",
+                "multi_database_access", 
+                "schema_per_tenant",
+                "intelligent_prompts",
+                "session_history"
+            ]
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"Service unhealthy: {str(e)}")
 
 
 # Legacy session endpoints removed - using schema-per-tenant architecture
@@ -291,7 +315,7 @@ async def query_database(
     current_user: User = Depends(get_current_user),
     db_session = Depends(get_db_session_with_schema)
 ):
-    """Process natural language query for authenticated user using schema-per-tenant architecture."""
+    """Process natural language query for authenticated user using enhanced multi-database architecture."""
     try:
         # Ensure user schema exists
         ensure_user_schema(current_user.email)
@@ -299,34 +323,42 @@ async def query_database(
         # Get user session from schema user service
         session = schema_user_service.create_session_from_email(current_user.email, current_user.name)
         
-        # Get or create SQL agent for this user's schema in portfoliosql
-        # Use the same schema name logic as SchemaUserSession
+        # Get or create Enhanced SQL agent for this user
         from schema_migration import email_to_schema_name
         schema_name = email_to_schema_name(current_user.email)
         
-        if current_user.email not in sql_agents:
-            # Create agent with schema-specific database connection using SchemaUserSession's db_uri
-            db_uri = session.db_uri
-            sql_agents[current_user.email] = create_multitenant_sql_agent(db_uri, schema_name=schema_name)
+        if current_user.email not in enhanced_sql_agents:
+            # Create enhanced agent with dynamic database discovery
+            enhanced_sql_agents[current_user.email] = create_enhanced_user_agent(current_user.email)
+            logger.info(f"✅ Created enhanced SQL agent for user: {current_user.email}")
         
-        agent_with_history = sql_agents[current_user.email]
+        enhanced_agent = enhanced_sql_agents[current_user.email]
         
-        # Process the query with LangChain's built-in chat history
-        result = agent_with_history.invoke(
-            {"input": request.query},
-            config={"configurable": {"session_id": current_user.email}}
+        # Process the query using the enhanced agent
+        result = enhanced_agent.process_query(
+            query=request.query,
+            session_id=current_user.email
         )
         
-        return QueryResponse(
-            success=True,
-            user_id=current_user.email,
-            schema=schema_name,
-            response=result["output"],
-            error=None
-        )
+        if result['success']:
+            return QueryResponse(
+                success=True,
+                user_id=current_user.email,
+                schema=result.get('schema') or schema_name or 'unknown',
+                response=result['response'],
+                error=None
+            )
+        else:
+            return QueryResponse(
+                success=False,
+                user_id=current_user.email,
+                schema=result.get('schema') or schema_name or 'unknown',
+                response=result['response'],
+                error=result.get('error')
+            )
         
     except Exception as e:
-        logger.error(f"Query processing failed for user {current_user.email}: {str(e)}")
+        logger.error(f"Enhanced query processing failed for user {current_user.email}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Query processing failed: {str(e)}")
 
 
@@ -576,6 +608,123 @@ async def delete_user_session(user_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
 
 
+# Enhanced agent management and database discovery endpoints
+@app.get("/discovery/databases")
+async def get_database_discovery(
+    current_user: User = Depends(get_current_user)
+):
+    """Get comprehensive database discovery information for the current user."""
+    try:
+        # Get user-specific database info
+        db_info = discovery_service.get_user_specific_database_info(current_user.email)
+        
+        return {
+            "success": True,
+            "user_email": current_user.email,
+            "database_info": db_info,
+            "discovery_timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Database discovery failed for {current_user.email}: {e}")
+        raise HTTPException(status_code=500, detail=f"Database discovery failed: {str(e)}")
+
+@app.get("/discovery/summary")
+async def get_discovery_summary(
+    current_user: User = Depends(get_current_user)
+):
+    """Get a summary of the user's database discovery and agent status."""
+    try:
+        # Check if user has an active enhanced agent
+        has_agent = current_user.email in enhanced_sql_agents
+        agent_summary = {}
+        
+        if has_agent:
+            agent = enhanced_sql_agents[current_user.email]
+            agent_summary = agent.get_database_summary()
+        
+        return {
+            "success": True,
+            "user_email": current_user.email,
+            "has_active_agent": has_agent,
+            "agent_summary": agent_summary,
+            "available_contexts": agent.list_available_contexts() if has_agent else [],
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Discovery summary failed for {current_user.email}: {e}")
+        raise HTTPException(status_code=500, detail=f"Discovery summary failed: {str(e)}")
+
+@app.post("/agent/refresh")
+async def refresh_user_agent(
+    current_user: User = Depends(get_current_user)
+):
+    """Refresh the user's enhanced agent with updated database discovery."""
+    try:
+        # Remove existing agent to force recreation with fresh discovery
+        if current_user.email in enhanced_sql_agents:
+            del enhanced_sql_agents[current_user.email]
+            logger.info(f"Removed existing agent for {current_user.email}")
+        
+        # Create new enhanced agent with fresh discovery
+        enhanced_sql_agents[current_user.email] = create_enhanced_user_agent(current_user.email)
+        
+        # Get updated summary
+        agent = enhanced_sql_agents[current_user.email]
+        summary = agent.get_database_summary()
+        
+        return {
+            "success": True,
+            "message": "Agent refreshed successfully",
+            "user_email": current_user.email,
+            "agent_summary": summary,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Agent refresh failed for {current_user.email}: {e}")
+        raise HTTPException(status_code=500, detail=f"Agent refresh failed: {str(e)}")
+
+@app.get("/agent/contexts")
+async def get_available_contexts(
+    current_user: User = Depends(get_current_user)
+):
+    """Get all available database/schema contexts for the user."""
+    try:
+        # Ensure user has an enhanced agent
+        if current_user.email not in enhanced_sql_agents:
+            enhanced_sql_agents[current_user.email] = create_enhanced_user_agent(current_user.email)
+        
+        agent = enhanced_sql_agents[current_user.email]
+        contexts = agent.list_available_contexts()
+        
+        return {
+            "success": True,
+            "user_email": current_user.email,
+            "available_contexts": contexts,
+            "total_contexts": len(contexts),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Context listing failed for {current_user.email}: {e}")
+        raise HTTPException(status_code=500, detail=f"Context listing failed: {str(e)}")
+
+@app.get("/admin/discovery/all")
+async def get_comprehensive_discovery():
+    """Admin endpoint to get comprehensive database discovery across all databases."""
+    try:
+        discovery_info = discovery_service.get_comprehensive_database_info(include_columns=True)
+        connectivity_test = discovery_service.test_database_connectivity()
+        
+        return {
+            "success": True,
+            "discovery_info": discovery_info,
+            "connectivity_test": connectivity_test,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Comprehensive discovery failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Comprehensive discovery failed: {str(e)}")
+
+
 # Evaluation and testing helpers
 def create_sample_evaluation_questions():
     """
@@ -673,6 +822,9 @@ async def get_user_schema_info_endpoint(
         logger.error(f"Error getting schema info for {current_user.email}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting schema info: {str(e)}")
 
+
+# Include multi-agent system routes
+app.include_router(multi_agent_router)
 
 include_auth_routes(app)
 

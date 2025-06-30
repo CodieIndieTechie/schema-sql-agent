@@ -109,10 +109,19 @@ def process_file_upload(self, files: List[str], email: str) -> Dict[str, Any]:
                     logger.error(error_msg)
                     continue
                 
+                # Debug: Log the file_result to see what we're getting
+                logger.info(f"File result for {file_path}: {file_result}")
+                
                 if file_result.get('success'):
                     result['files_processed'].append(file_path)
-                    if 'tables' in file_result:
-                        result['tables_created'].extend(file_result['tables'])
+                    
+                    # Debug: Check what tables_created contains
+                    tables_created = file_result.get('tables_created', [])
+                    logger.info(f"Tables created in file_result: {tables_created}")
+                    
+                    if 'tables_created' in file_result:
+                        result['tables_created'].extend(file_result['tables_created'])
+                        logger.info(f"Updated result tables_created: {result['tables_created']}")
                     if 'total_rows' in file_result:
                         result['total_rows'] += file_result['total_rows']
                     
@@ -162,12 +171,12 @@ def process_file_upload(self, files: List[str], email: str) -> Dict[str, Any]:
 )
 def process_sql_query(self, query: str, email: str, database_name: str, session_id: str) -> Dict[str, Any]:
     """
-    Process SQL query using the agent
+    Process SQL query using the enhanced multi-database agent
     
     Args:
         query: Natural language query
         email: User email
-        database_name: Database name
+        database_name: Database name (optional, for backwards compatibility)
         session_id: Session identifier
         
     Returns:
@@ -177,23 +186,21 @@ def process_sql_query(self, query: str, email: str, database_name: str, session_
         logger.info(f"Processing SQL query for user {email}: {query[:100]}...")
         
         # Import here to avoid circular imports
-        from multitenant_api import MultitenanSQLAgent
+        from enhanced_sql_agent import create_enhanced_user_agent
         
-        # Initialize agent
-        agent = MultitenanSQLAgent()
+        # Create enhanced agent for the user
+        enhanced_agent = create_enhanced_user_agent(email)
         
-        # Process the query
-        result = agent.process_query(
+        # Process the query using the enhanced agent
+        result = enhanced_agent.process_query(
             query=query,
-            email=email,
-            database_name=database_name,
-            session_id=session_id
+            session_id=session_id or f"celery_{self.request.id}"
         )
         
-        logger.info(f"SQL query processed successfully for user {email}")
+        logger.info(f"Enhanced SQL query processed successfully for user {email}")
         return {
             'task_id': self.request.id,
-            'status': 'success',
+            'status': 'success' if result['success'] else 'failure',
             'result': result,
             'completed_at': datetime.utcnow().isoformat()
         }

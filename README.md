@@ -1,12 +1,59 @@
-# 🚀 Multi-Tenant SQL Agent
+# 🚀 Multi-Agent Financial Analysis System
 
-> A production-ready, AI-powered SQL agent with multi-tenant architecture, featuring natural language querying, file upload processing, and modern Gemini-style UI.
+> A production-ready, AI-powered multi-agent system with advanced SQL capabilities, featuring natural language querying, intelligent financial analysis, multi-database discovery, file upload processing, and modern Gemini-style UI.
 
 ## ✨ Overview
 
-This sophisticated multi-tenant SQL agent enables users to query databases using natural language through an AI-powered interface. The system supports both shared portfolio data and user-specific uploaded datasets, providing a comprehensive data analysis solution with enterprise-grade architecture.
+This sophisticated multi-agent financial analysis system combines the power of specialized AI agents to provide comprehensive financial insights. Built on a robust multi-tenant SQL foundation, it enables users to query databases using natural language, get expert financial analysis, research current market data, and receive beautifully formatted reports - all through an intelligent multi-agent orchestration system.
 
-## 🎯 Key Features
+### 🎯 **What Makes This Special:**
+- **Multi-Agent Intelligence**: 5 specialized agents working together for comprehensive analysis
+- **Financial Expertise**: Dedicated mutual fund and investment analysis capabilities
+- **Dynamic Database Discovery**: Automatically discovers and maps multiple databases
+- **Schema-per-Tenant**: Enterprise-grade multi-tenant architecture with data isolation
+- **Real-Time Processing**: Streaming updates and real-time agent coordination
+- **Production Ready**: Modular, configurable, and extensible architecture
+
+## 🤖 Multi-Agent System Features
+
+### 🎆 **Intelligent Agent Orchestration**
+- **OrchestratorAgent**: Main coordinator that analyzes queries and routes to appropriate agents
+- **Dynamic Workflow Selection**: Automatically chooses between 5+ workflow types based on query complexity
+- **Real-Time Coordination**: Agents communicate and collaborate in real-time
+- **Intelligent Routing**: Smart decision-making on which agents to involve
+- **Session Management**: Maintains conversation context across multi-turn interactions
+
+### 📊 **Specialized Financial Agents**
+- **SQLAgentWrapper**: Enhanced integration with existing multi-database SQL infrastructure
+- **MutualFundExpertAgent**: Dedicated Indian mutual fund analysis with investment insights
+- **WebAgent**: Current market research and financial news gathering
+- **DataFormatterAgent**: Beautiful chart generation and professional report formatting
+- **Expert Analysis**: Deep financial insights with context-aware recommendations
+
+### 🔄 **Advanced Workflow Management**
+- **Simple Query**: Direct SQL queries with intelligent formatting
+- **Full Analysis with Web**: Comprehensive analysis combining database + market research
+- **Comparison Analysis**: Side-by-side fund/investment comparisons
+- **Portfolio Analysis**: Portfolio-level insights and recommendations
+- **Performance Analysis**: Detailed performance analysis with benchmarking
+
+### 🌍 **Multi-Agent API Endpoints**
+- `POST /multi-agent/query` - Process queries through multi-agent system
+- `POST /multi-agent/query/stream` - Real-time streaming updates
+- `GET /multi-agent/health` - Comprehensive system health monitoring
+- `GET /multi-agent/workflows` - Available workflows and capabilities
+- `POST /multi-agent/agents/refresh/{user_email}` - Agent cache management
+- `GET /multi-agent/agents/status` - Detailed agent status and statistics
+- `GET /multi-agent/config` - System configuration and feature toggles
+
+### ⚙️ **Configuration & Customization**
+- **Environment-Based Configuration**: Easy tuning without code changes
+- **Feature Toggles**: Enable/disable agents and capabilities
+- **Timeout & Iteration Control**: Configurable safety limits
+- **Model Selection**: Choose between different AI models
+- **Expert Prompts**: Editable agent prompts and behaviors
+
+## 🎯 Traditional SQL Agent Features
 
 ### 🏢 **Multi-Tenant Architecture**
 - **Schema-per-Tenant**: Advanced multi-tenant isolation with dedicated database schemas
@@ -58,31 +105,46 @@ graph TB
     
     subgraph "API Layer"
         E[FastAPI Server<br/>Port: 8001] --> F[JWT Auth<br/>Middleware]
-        E --> G[SQL Agent<br/>LangChain]
-        E --> H[File Processing<br/>Endpoints]
+        E --> G[Multi-Agent API<br/>Endpoints]
+        E --> H[Traditional SQL<br/>Endpoints]
+        E --> I[File Processing<br/>Endpoints]
+    end
+    
+    subgraph "Multi-Agent Intelligence Layer"
+        J[MultiAgentOrchestrator<br/>Main Coordinator] --> K[SQLAgentWrapper<br/>Database Queries]
+        J --> L[MutualFundExpert<br/>Financial Analysis]
+        J --> M[WebAgent<br/>Market Research]
+        J --> N[DataFormatter<br/>Visualization]
+        O[MultiAgentService<br/>Business Logic] --> J
+        P[Configuration<br/>Environment Variables] --> J
     end
     
     subgraph "Task Processing"
-        I[Celery Workers<br/>Background Tasks] --> J[File Processing<br/>Queue]
-        I --> K[Query Processing<br/>Queue]
-        I --> L[Maintenance<br/>Queue]
-        M[Redis Broker<br/>Port: 6379] --> I
-        N[Flower Dashboard<br/>Port: 5555] --> I
+        Q[Celery Workers<br/>Background Tasks] --> R[File Processing<br/>Queue]
+        Q --> S[Query Processing<br/>Queue]
+        Q --> T[Maintenance<br/>Queue]
+        U[Redis Broker<br/>Port: 6379] --> Q
+        V[Flower Dashboard<br/>Port: 5555] --> Q
     end
     
     subgraph "Database Layer"
-        O[PostgreSQL<br/>Multi-tenant]
-        P[portfoliosql<br/>Shared Schema]
-        Q[user_schema_*<br/>Tenant Schemas]
-        R[user_db_*<br/>Legacy DBs]
+        W[PostgreSQL<br/>Multi-tenant]
+        X[portfoliosql<br/>Shared Schema]
+        Y[user_schema_*<br/>Tenant Schemas]
+        Z[user_db_*<br/>Legacy DBs]
+        AA[Discovery Service<br/>4+ Databases]
     end
     
     A --> E
-    E --> I
-    E --> O
-    O --> P
-    O --> Q
-    O --> R
+    E --> G
+    G --> O
+    O --> K
+    K --> W
+    E --> Q
+    W --> X
+    W --> Y
+    W --> Z
+    K --> AA
 ```
 
 ### 🗄️ Database Architecture
@@ -104,6 +166,80 @@ graph TB
    - Feature flags control migration rollout
    - Automatic fallback to legacy system
    - Seamless user experience during transition
+
+## 🤖 Multi-Agent System Configuration
+
+### 📊 **Environment Variables for Multi-Agent System**
+
+```bash
+# === OpenAI Configuration ===
+OPENAI_API_KEY=your_openai_api_key_here
+AGENT_MODEL=gpt-4o
+AGENT_TEMPERATURE=0.3
+AGENT_MAX_TOKENS=3000
+
+# === Orchestrator Configuration ===
+MAX_AGENT_ITERATIONS=10
+AGENT_TIMEOUT_SECONDS=300
+ENABLE_AGENT_CACHING=true
+
+# === Feature Toggles ===
+ENABLE_WEB_RESEARCH=true
+WEB_SEARCH_ENABLED=false
+ENABLE_CHART_GENERATION=true
+MUTUAL_FUND_EXPERT_ENABLED=true
+
+# === Web Agent Configuration ===
+WEB_SCRAPING_TIMEOUT=30
+MAX_WEB_SOURCES=5
+
+# === Data Formatter Configuration ===
+MAX_CHART_DATA_POINTS=100
+
+# === Expert Agent Configuration ===
+FINANCIAL_ANALYSIS_DEPTH=comprehensive
+```
+
+### 🔧 **Multi-Agent System Usage Examples**
+
+**1. Simple Query Processing:**
+```bash
+curl -X POST http://localhost:8001/multi-agent/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What are the top performing large cap mutual funds?",
+    "user_email": "user@example.com",
+    "enable_caching": true
+  }'
+```
+
+**2. Streaming Analysis:**
+```bash
+curl -X POST http://localhost:8001/multi-agent/query/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Compare HDFC Top 100 and ICICI Prudential Bluechip funds",
+    "user_email": "user@example.com"
+  }'
+```
+
+**3. System Health Check:**
+```bash
+curl -X GET http://localhost:8001/multi-agent/health
+```
+
+**4. Available Workflows:**
+```bash
+curl -X GET http://localhost:8001/multi-agent/workflows
+```
+
+### 🔍 **Multi-Agent Workflow Types**
+
+1. **simple_query**: Direct SQL queries with intelligent formatting
+2. **full_analysis_with_web**: Comprehensive analysis with market research
+3. **comparison_analysis**: Side-by-side fund/investment comparisons
+4. **portfolio_analysis**: Portfolio-level insights and recommendations
+5. **performance_analysis**: Detailed performance analysis with benchmarking
 
 ## 🚀 Quick Start
 
@@ -196,7 +332,20 @@ cd ..
 
 ## 🎬 Running the Application
 
-### 🔥 **Option 1: Production Mode (Recommended)**
+### 🤖 **Option 1: Multi-Agent System (Recommended)**
+```bash
+python start_multi_agent_server.py
+```
+**Starts multi-agent system with:**
+- ✅ FastAPI backend with multi-agent endpoints (http://localhost:8001)
+- ✅ 5 Specialized AI agents (SQL, Expert, Web, Formatter, Orchestrator)
+- ✅ Real-time streaming capabilities
+- ✅ Dynamic workflow selection
+- ✅ Multi-database discovery (4+ databases)
+- ✅ API Documentation: http://localhost:8001/docs
+- ✅ Multi-agent health check: http://localhost:8001/multi-agent/health
+
+### 🔥 **Option 2: Full Production Mode**
 ```bash
 python start_production.py
 ```
@@ -207,6 +356,7 @@ python start_production.py
 - ✅ Celery workers (background processing)
 - ✅ Celery beat (scheduled tasks)
 - ✅ Flower dashboard (http://localhost:5555)
+- ✅ Multi-agent system integrated
 
 ### 🛠️ **Option 2: Development Mode**
 ```bash
@@ -217,7 +367,7 @@ python start_multitenant.py
 - ✅ Next.js frontend (http://localhost:3001)
 - ⚠️ **Note**: Start Celery workers separately for full functionality
 
-### ⚡ **Option 3: Individual Components**
+### ⚡ **Option 4: Individual Components**
 ```bash
 # Terminal 1: Backend API
 python -m uvicorn multitenant_api:app --host 0.0.0.0 --port 8001 --reload
@@ -463,6 +613,29 @@ sql_agent_project_v4_multitenant/
 ├── start_celery_worker.py     # ⚡ Worker startup
 ├── start_celery_beat.py       # ⏰ Scheduler startup
 ├── start_celery_flower.py     # 🌸 Monitoring dashboard
+├── start_multi_agent_server.py # 🤖 Multi-agent system startup
+│
+├── agents/                     # 🤖 Multi-Agent System
+│   ├── __init__.py            # 📦 Agent exports
+│   ├── base_agent.py          # 🏗 Abstract base class
+│   ├── agent_configs.py       # ⚙️ Agent configuration & prompts
+│   ├── sql_agent_wrapper.py   # 📊 SQL agent integration
+│   ├── mutual_fund_expert.py  # 💰 Financial expert agent
+│   ├── web_agent.py           # 🌐 Web research agent
+│   ├── data_formatter.py      # 📈 Data visualization agent
+│   └── multi_agent_orchestrator.py # 🎭 Main orchestrator
+│
+├── api/                        # 🌐 API Layer
+│   ├── __init__.py            # 📦 API exports
+│   └── multi_agent_api.py     # 🚀 Multi-agent FastAPI endpoints
+│
+├── config/                     # ⚙️ Configuration Management
+│   ├── __init__.py            # 📦 Config exports
+│   └── multi_agent_config.py  # 📝 Multi-agent configuration
+│
+├── services/                   # 🔧 Service Layer
+│   ├── __init__.py            # 📦 Service exports
+│   └── multi_agent_service.py # 🏢 Business logic layer
 │
 ├── frontend/                  # ⚙️ Next.js 15 + TypeScript + Tailwind
 │   ├── package.json          # 📦 Node.js dependencies
@@ -496,6 +669,283 @@ sql_agent_project_v4_multitenant/
 - **Celery + Redis**: Production-ready async task queue
 - **Flower Dashboard**: Task monitoring and debugging
 - **Queue Management**: Separate queues for different task types
+
+**🤖 Multi-Agent Intelligence System:**
+- **MultiAgentOrchestrator**: Main coordinator with dynamic workflow selection
+- **SQLAgentWrapper**: Database query specialist with multi-tenant support
+- **MutualFundExpertAgent**: Indian financial analysis expert with investment insights
+- **WebAgent**: Market research specialist with web data gathering
+- **DataFormatterAgent**: Visualization expert creating charts and professional reports
+- **MultiAgentService**: Business logic layer with session management and caching
+- **Configuration System**: Environment-driven feature toggles and agent parameters
+
+### 🧠 **Agent Capabilities & Specializations**
+
+**🎭 MultiAgentOrchestrator (Main Coordinator)**
+- Analyzes query complexity and routes to appropriate specialists
+- Coordinates multi-agent workflows and manages conversation flow
+- Provides intelligent fallback and error recovery
+- Maintains session context and conversation history
+- Supports 5 workflow types: simple_query, full_analysis_with_web, comparison_analysis, portfolio_analysis, performance_analysis
+
+**📊 SQLAgentWrapper (Database Specialist)**
+- Integrates with existing SQL agent infrastructure
+- Multi-database discovery and intelligent context switching
+- Schema-per-tenant architecture with user isolation
+- Advanced query optimization and result caching
+- Support for 4+ databases with dynamic discovery
+
+**💰 MutualFundExpertAgent (Financial Analyst)**
+- Specialized in Indian mutual fund market analysis
+- Investment recommendations with risk assessment
+- Performance analysis with benchmark comparisons
+- Portfolio optimization suggestions
+- Regulatory compliance and tax implications
+
+**🌐 WebAgent (Market Research Specialist)**
+- Real-time market data integration (simulated for demo)
+- News sentiment analysis and market trends
+- Competitor analysis and industry insights
+- Economic indicators and regulatory updates
+- Trusted financial news sources integration
+
+**📈 DataFormatterAgent (Visualization Expert)**
+- Professional report generation with charts and graphs
+- Interactive data visualizations using modern chart libraries
+- Executive summary creation with key insights
+- Multi-format output (JSON, HTML, PDF-ready)
+- Responsive design for web and mobile consumption
+
+### 🔄 **Multi-Agent Workflow Examples**
+
+**Scenario 1: Simple Query**
+```
+User: "Show me HDFC Top 100 fund performance"
+→ Orchestrator → SQLAgent → DataFormatter → Response
+```
+
+**Scenario 2: Comprehensive Analysis**
+```
+User: "Should I invest in large cap funds now?"
+→ Orchestrator → SQLAgent (fund data) → WebAgent (market trends) 
+→ MutualFundExpert (analysis) → DataFormatter (report) → Response
+```
+
+**Scenario 3: Comparison Analysis**
+```
+User: "Compare top 5 ELSS funds"
+→ Orchestrator → SQLAgent (fund data) → MutualFundExpert (comparison)
+→ WebAgent (current market) → DataFormatter (comparison charts) → Response
+```
+
+## 📚 API Documentation
+
+### 🤖 **Multi-Agent System API Endpoints**
+
+**Base URL**: `http://localhost:8001/multi-agent`
+
+#### 🚀 **Primary Endpoints**
+
+**1. Process Query**
+```http
+POST /multi-agent/query
+Content-Type: application/json
+
+{
+  "query": "What are the top performing large cap mutual funds?",
+  "user_email": "user@example.com",
+  "enable_caching": true,
+  "context": "investment_analysis"
+}
+```
+
+**Response:**
+```json
+{
+  "response": "Comprehensive analysis with charts and recommendations",
+  "workflow_used": "full_analysis_with_web",
+  "agents_involved": ["SQLAgent", "MutualFundExpert", "WebAgent", "DataFormatter"],
+  "execution_time": "12.5s",
+  "cache_hit": false,
+  "session_id": "session_abc123"
+}
+```
+
+**2. Streaming Query (Real-time Updates)**
+```http
+POST /multi-agent/query/stream
+Content-Type: application/json
+
+{
+  "query": "Compare HDFC Top 100 and ICICI Prudential Bluechip funds",
+  "user_email": "user@example.com"
+}
+```
+
+**Streaming Response:**
+```json
+{"type": "status", "message": "Starting analysis..."}
+{"type": "agent_start", "agent": "SQLAgent", "task": "Fetching fund data"}
+{"type": "agent_progress", "agent": "SQLAgent", "progress": 50}
+{"type": "agent_complete", "agent": "SQLAgent", "result": "Fund data retrieved"}
+{"type": "final_response", "response": "Detailed comparison analysis..."}
+```
+
+#### 🔍 **System Management Endpoints**
+
+**3. Health Check**
+```http
+GET /multi-agent/health
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "agents": {
+    "orchestrator": {"status": "healthy", "last_used": "2024-01-15T10:30:00Z"},
+    "sql_agent": {"status": "healthy", "databases_connected": 4},
+    "mutual_fund_expert": {"status": "healthy", "specialization": "indian_markets"},
+    "web_agent": {"status": "healthy", "sources_available": 5},
+    "data_formatter": {"status": "healthy", "chart_engine": "ready"}
+  },
+  "system_stats": {
+    "total_queries_processed": 1247,
+    "average_response_time": "8.2s",
+    "cache_hit_rate": "73%"
+  }
+}
+```
+
+**4. Available Workflows**
+```http
+GET /multi-agent/workflows
+```
+
+**Response:**
+```json
+{
+  "workflows": [
+    {
+      "name": "simple_query",
+      "description": "Direct SQL queries with intelligent formatting",
+      "agents": ["SQLAgent", "DataFormatter"],
+      "avg_time": "3.5s"
+    },
+    {
+      "name": "full_analysis_with_web",
+      "description": "Comprehensive analysis with market research",
+      "agents": ["SQLAgent", "WebAgent", "MutualFundExpert", "DataFormatter"],
+      "avg_time": "15.2s"
+    }
+  ]
+}
+```
+
+**5. Agent Management**
+```http
+POST /multi-agent/agents/refresh/{user_email}
+```
+
+**Response:**
+```json
+{
+  "message": "Agents refreshed successfully",
+  "user_email": "user@example.com",
+  "agents_refreshed": 5,
+  "cache_cleared": true
+}
+```
+
+**6. System Configuration**
+```http
+GET /multi-agent/config
+```
+
+**Response:**
+```json
+{
+  "model": "gpt-4o",
+  "max_iterations": 10,
+  "timeout_seconds": 300,
+  "features": {
+    "web_research": true,
+    "chart_generation": true,
+    "caching": true,
+    "mutual_fund_expert": true
+  },
+  "database_count": 4
+}
+```
+
+**7. Test System**
+```http
+POST /multi-agent/test
+```
+
+**Response:**
+```json
+{
+  "test_results": {
+    "orchestrator": "pass",
+    "sql_agent": "pass",
+    "mutual_fund_expert": "pass",
+    "web_agent": "pass",
+    "data_formatter": "pass"
+  },
+  "overall_status": "all_tests_passed",
+  "test_duration": "2.3s"
+}
+```
+
+### 📊 **Traditional SQL Agent Endpoints**
+
+**Base URL**: `http://localhost:8001`
+
+- `POST /chat` - Traditional SQL agent chat
+- `POST /upload` - File upload and processing
+- `GET /discovery/databases` - Database discovery info
+- `GET /discovery/summary` - Agent status and database summary
+- `POST /agent/refresh` - Refresh SQL agent
+- `GET /agent/contexts` - Available database contexts
+- `GET /health` - System health check
+
+### 🔐 **Authentication**
+
+All endpoints require valid JWT authentication:
+
+```http
+Authorization: Bearer <jwt_token>
+```
+
+Obtain tokens via Google OAuth:
+```http
+POST /auth/google
+```
+
+### 📊 **Error Handling**
+
+**Standard Error Response:**
+```json
+{
+  "error": "ValidationError",
+  "message": "Invalid query format",
+  "details": {
+    "field": "query",
+    "issue": "Query cannot be empty"
+  },
+  "timestamp": "2024-01-15T10:30:00Z"
+}
+```
+
+**HTTP Status Codes:**
+- `200` - Success
+- `400` - Bad Request (validation errors)
+- `401` - Unauthorized (invalid/missing token)
+- `403` - Forbidden (insufficient permissions)
+- `429` - Rate Limited
+- `500` - Internal Server Error
+- `503` - Service Unavailable (agents down)
 
 ## 🛠️ Development Guide
 
@@ -648,6 +1098,17 @@ export PORTFOLIOSQL_DATABASE_URI="postgresql://user:pass@prod-db:5432/portfolios
 # Redis configuration
 export REDIS_URL="redis://prod-redis:6379/0"
 export CELERY_BROKER_URL="redis://prod-redis:6379/0"
+
+# Multi-Agent System Configuration
+export OPENAI_API_KEY="your_production_openai_key"
+export AGENT_MODEL="gpt-4o"
+export AGENT_TEMPERATURE="0.3"
+export MAX_AGENT_ITERATIONS="10"
+export AGENT_TIMEOUT_SECONDS="300"
+export ENABLE_AGENT_CACHING="true"
+export ENABLE_WEB_RESEARCH="true"
+export ENABLE_CHART_GENERATION="true"
+export MUTUAL_FUND_EXPERT_ENABLED="true"
 export CELERY_RESULT_BACKEND="redis://prod-redis:6379/0"
 ```
 
@@ -673,6 +1134,95 @@ docker build -t sql-agent .
 docker run -d --name sql-agent-app -p 8001:8001 sql-agent
 ```
 
+## 🤖 Multi-Agent System Production Integration
+
+### 🏗️ **Multi-Agent Production Setup**
+
+**1. OpenAI API Key Verification:**
+```bash
+# Verify API key works in production
+curl -H "Authorization: Bearer $OPENAI_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "test"}], "max_tokens": 10}' \
+     https://api.openai.com/v1/chat/completions
+```
+
+**2. Multi-Agent System Health Check:**
+```bash
+# Start multi-agent enabled server
+python start_multi_agent_server.py
+
+# Verify all 5 agents are healthy
+curl http://localhost:8001/multi-agent/health | jq '.agents'
+
+# Test system functionality
+curl -X POST http://localhost:8001/multi-agent/test \
+     -H "Content-Type: application/json"
+```
+
+**3. Performance Tuning for Production:**
+```bash
+# Production optimized settings
+export MAX_AGENT_ITERATIONS=15
+export AGENT_TIMEOUT_SECONDS=600  
+export ENABLE_AGENT_CACHING=true
+export WEB_SCRAPING_TIMEOUT=45
+export MAX_CHART_DATA_POINTS=500
+```
+
+### 📊 **Multi-Agent Monitoring**
+
+**Real-time System Monitoring:**
+```bash
+# Monitor agent performance
+while true; do
+  echo "=== Multi-Agent Health $(date) ==="
+  curl -s http://localhost:8001/multi-agent/health | jq '.system_stats'
+  sleep 30
+done
+```
+
+**Agent Status Dashboard:**
+```bash
+# Get detailed agent status
+curl http://localhost:8001/multi-agent/agents/status | jq '{
+  orchestrator: .orchestrator.status,
+  sql_agent: .sql_agent.databases_connected,
+  expert_agent: .mutual_fund_expert.specialization,
+  web_agent: .web_agent.sources_available,
+  formatter: .data_formatter.chart_engine
+}'
+```
+
+### 🔧 **Multi-Agent Troubleshooting**
+
+**Common Production Issues:**
+
+🐛 **Agent timeout errors:**
+```bash
+# Increase timeout and check OpenAI API
+export AGENT_TIMEOUT_SECONDS=600
+curl -I https://api.openai.com/v1/models
+```
+
+🐛 **SQLAgent connection issues:**
+```bash
+# Refresh SQL agent cache
+curl -X POST http://localhost:8001/multi-agent/agents/refresh/user@example.com
+
+# Verify database discovery
+curl http://localhost:8001/discovery/summary
+```
+
+🐛 **High memory usage:**
+```bash
+# Clear all agent caches
+curl -X POST http://localhost:8001/multi-agent/agents/refresh/all
+
+# Monitor memory usage
+ps aux | grep python | grep multi_agent
+```
+
 ### 📈 **Scaling & Performance**
 - **Horizontal Scaling**: Add more Celery workers across machines
 - **Database Scaling**: PostgreSQL read replicas for query performance
@@ -694,25 +1244,208 @@ docker run -d --name sql-agent-app -p 8001:8001 sql-agent
 - 📱 **Responsive Design**: Mobile-friendly interface
 
 ### 🔮 **Future Enhancements**
-- 🧠 **Advanced Analytics**: Data visualization and insights
-- 📊 **Dashboard Builder**: Custom dashboard creation
-- 🔄 **API Integrations**: Connect external data sources
-- 🤖 **Enhanced AI**: More sophisticated query understanding
-- 📱 **Mobile App**: Native mobile application
+
+**🤖 Multi-Agent System Evolution:**
+- 🌐 **Real Web Integration**: Live market data APIs (BSE, NSE, Morningstar)
+- 📈 **Advanced Visualizations**: Interactive charts with Plotly/D3.js
+- 🧠 **Custom Agent Creation**: User-defined specialist agents
+- 🔄 **Workflow Designer**: Visual workflow builder interface
+- 📊 **Portfolio Management**: Complete portfolio tracking and optimization
+- 🚨 **Smart Alerts**: AI-powered investment opportunity notifications
+
+**🏗️ System Enhancements:**
+- 📊 **Advanced Analytics**: Multi-dimensional data analysis
+- 🎨 **Dashboard Builder**: Custom dashboard creation
+- 🔄 **API Integrations**: Connect external financial data sources
+- 📱 **Mobile App**: Native mobile application with agent chat
 - 🌍 **Multi-Language**: Internationalization support
+- 🔍 **Voice Interface**: Voice-to-query conversion
+
+## 🔧 Extending the Multi-Agent System
+
+### 🎆 **Adding New Agents**
+
+**1. Create New Agent Class:**
+```python
+# agents/your_custom_agent.py
+from agents.base_agent import BaseAgent
+from agents.agent_configs import AgentMessage, AgentState
+
+class YourCustomAgent(BaseAgent):
+    def __init__(self, config):
+        super().__init__(
+            agent_id="your_custom_agent",
+            agent_type="specialist",
+            description="Your agent description",
+            config=config
+        )
+    
+    async def process_message(self, message: AgentMessage, state: AgentState) -> AgentMessage:
+        # Your custom agent logic here
+        prompt = f"As a [your specialty] expert, {message.content}"
+        response = await self.call_llm(prompt, message.context)
+        
+        return AgentMessage(
+            content=response,
+            agent_id=self.agent_id,
+            message_type="response",
+            context=message.context
+        )
+```
+
+**2. Register Agent in Orchestrator:**
+```python
+# agents/multi_agent_orchestrator.py
+# Add to __init__ method:
+self.your_custom_agent = YourCustomAgent(self.config)
+
+# Add to _route_to_agents method:
+if "your_specialty_keyword" in query.lower():
+    agents_to_use.append("your_custom_agent")
+```
+
+**3. Add Agent Configuration:**
+```python
+# config/multi_agent_config.py
+YOUR_CUSTOM_AGENT_ENABLED = get_bool_env("YOUR_CUSTOM_AGENT_ENABLED", True)
+
+# agents/agent_configs.py
+YOUR_CUSTOM_AGENT_PROMPT = """
+You are a specialist in [your domain]. 
+Provide expert analysis and recommendations.
+"""
+```
+
+### 🔄 **Adding New Workflows**
+
+**1. Define Workflow in Orchestrator:**
+```python
+# agents/multi_agent_orchestrator.py
+async def your_custom_workflow(self, query: str, user_email: str, context: dict) -> dict:
+    """
+    Custom workflow for specific use cases
+    """
+    workflow_steps = [
+        ("your_custom_agent", "Analyze the request"),
+        ("sql_agent", "Fetch relevant data"),
+        ("data_formatter", "Format results")
+    ]
+    
+    # Execute workflow steps
+    results = {}
+    for agent_name, task in workflow_steps:
+        agent = getattr(self, agent_name)
+        result = await agent.process_message(AgentMessage(
+            content=f"{task}: {query}",
+            context=context
+        ), self.state)
+        results[agent_name] = result
+    
+    return self._combine_agent_results(results)
+```
+
+**2. Add Workflow to Router:**
+```python
+# Add to _select_workflow method:
+if "custom_analysis" in query.lower():
+    return "your_custom_workflow"
+```
+
+### 📊 **Custom Data Sources Integration**
+
+**1. External API Integration:**
+```python
+# agents/external_data_agent.py
+class ExternalDataAgent(BaseAgent):
+    async def fetch_market_data(self, symbol: str):
+        # Integration with external APIs
+        api_key = self.config.external_api_key
+        url = f"https://api.example.com/data/{symbol}"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers={"API-Key": api_key})
+            return response.json()
+```
+
+**2. Database Integration:**
+```python
+# Add new database connections
+class CustomDatabaseAgent(BaseAgent):
+    async def connect_external_db(self):
+        connection_string = self.config.external_db_url
+        # Connect to external financial database
+        return create_engine(connection_string)
+```
+
+### 🌐 **Production Deployment Extensions**
+
+**1. Kubernetes Deployment:**
+```yaml
+# k8s/multi-agent-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-agent-system
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: multi-agent
+  template:
+    spec:
+      containers:
+      - name: multi-agent
+        image: your-registry/multi-agent:latest
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openai-secret
+              key: api-key
+```
+
+**2. Advanced Monitoring:**
+```python
+# monitoring/agent_metrics.py
+from prometheus_client import Counter, Histogram, Gauge
+
+# Custom metrics for multi-agent system
+agent_requests_total = Counter('agent_requests_total', 'Total agent requests', ['agent_name'])
+agent_response_time = Histogram('agent_response_seconds', 'Agent response time')
+active_sessions = Gauge('active_agent_sessions', 'Number of active agent sessions')
+```
 
 ---
 
 ## 📝 **Support & Documentation**
 
-- **📚 Full Documentation**: This README.md
-- **🔧 API Docs**: http://localhost:8001/docs (Interactive Swagger UI)
-- **📚 API Reference**: http://localhost:8001/redoc (ReDoc format)
-- **🌸 Task Monitor**: http://localhost:5555 (Flower dashboard)
-- **🐛 Issue Tracking**: Report bugs via GitHub issues
-- **✨ Feature Requests**: Suggest enhancements via GitHub discussions
+**📚 Core Documentation:**
+- **Complete Guide**: This README.md (comprehensive system overview)
+- **API Documentation**: http://localhost:8001/docs (Interactive Swagger UI)
+- **API Reference**: http://localhost:8001/redoc (ReDoc format)
+- **Task Monitor**: http://localhost:5555 (Flower dashboard)
 
-**Built with ❤️ by the team** | **Powered by OpenAI GPT, FastAPI, Next.js & PostgreSQL**
+**🤖 Multi-Agent System Documentation:**
+- **System Health**: http://localhost:8001/multi-agent/health
+- **Available Workflows**: http://localhost:8001/multi-agent/workflows
+- **System Configuration**: http://localhost:8001/multi-agent/config
+- **Agent Status**: http://localhost:8001/multi-agent/agents/status
+- **Real-time Testing**: http://localhost:8001/multi-agent/test
+
+**🔍 Development Resources:**
+- **Database Discovery**: http://localhost:8001/discovery/summary
+- **SQL Agent Status**: http://localhost:8001/health
+- **Authentication**: http://localhost:8001/auth/me
+
+**🐛 Support Channels:**
+- **Issue Tracking**: Report bugs via GitHub issues
+- **Feature Requests**: Suggest enhancements via GitHub discussions
+- **System Logs**: Check console output for debugging
+- **Performance Monitoring**: Use built-in health check endpoints
+
+**Built with ❤️ using cutting-edge AI technology**
+
+**Powered by:** OpenAI GPT-4o | FastAPI | Next.js | PostgreSQL | Multi-Agent Intelligence
 
 ### Scaling Considerations
 - **Database**: Use connection pooling and read replicas
