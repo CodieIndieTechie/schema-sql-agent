@@ -93,11 +93,19 @@ def process_file_upload(self, files: List[str], email: str) -> Dict[str, Any]:
                 logger.info(f"Processing file: {file_path}")
                 
                 # Process the file using MultiSheetExcelUploader
-                # Create user session using SchemaUserSession
+                # Create user session using SchemaUserSession - ensure consistent schema naming
                 from schema_user_service import SchemaUserSession
+                from schema_migration import email_to_schema_name
                 try:
+                    # Ensure we use the same schema naming as the chat agent
+                    expected_schema = email_to_schema_name(email)
                     user_session = SchemaUserSession(email=email)
                     logger.info(f"Created user session for: {email} with schema: {user_session.schema_name}")
+                    logger.info(f"Expected schema name: {expected_schema}")
+                    
+                    # Verify schema consistency
+                    if user_session.schema_name != expected_schema:
+                        logger.warning(f"Schema mismatch! UserSession: {user_session.schema_name}, Expected: {expected_schema}")
                     
                     file_result = uploader.upload_file_with_sheets(
                         file_path=file_path,

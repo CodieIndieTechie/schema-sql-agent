@@ -19,7 +19,8 @@ from sqlalchemy import text
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # LangChain imports
@@ -68,6 +69,8 @@ class QueryResponse(BaseModel):
     schema: str
     success: bool
     error: Optional[str] = None
+    chart_file: Optional[str] = None
+    chart_type: Optional[str] = None
 
 
 class UploadResponse(BaseModel):
@@ -341,12 +344,19 @@ async def query_database(
         )
         
         if result['success']:
+            # Chart generation is now handled directly by Enhanced SQL Agent
+            # Extract chart info from agent result if available
+            chart_file = result.get('chart_file')
+            chart_type = result.get('chart_type')
+            
             return QueryResponse(
                 success=True,
                 user_id=current_user.email,
                 schema=result.get('schema') or schema_name or 'unknown',
                 response=result['response'],
-                error=None
+                error=None,
+                chart_file=chart_file if 'chart_file' in locals() else None,
+                chart_type=chart_type if 'chart_type' in locals() else None
             )
         else:
             return QueryResponse(
@@ -821,6 +831,93 @@ async def get_user_schema_info_endpoint(
     except Exception as e:
         logger.error(f"Error getting schema info for {current_user.email}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting schema info: {str(e)}")
+
+
+# Chart serving endpoints
+@app.get("/charts/{chart_file}")
+async def serve_chart(chart_file: str):
+    """
+    Serve generated chart HTML files.
+    
+    Args:
+        chart_file: The chart filename (e.g., 'chart_123.html')
+        
+    Returns:
+        HTML content of the chart
+    """
+    try:
+        # Ensure chart_file is safe (no path traversal)
+        if ".." in chart_file or "/" in chart_file or "\\" in chart_file:
+            raise HTTPException(status_code=400, detail="Invalid chart file name")
+            
+        # Ensure it's an HTML file
+        if not chart_file.endswith('.html'):
+            raise HTTPException(status_code=400, detail="Invalid file type")
+            
+        # Construct full path
+        charts_dir = "static/charts"
+        chart_path = os.path.join(charts_dir, chart_file)
+        
+        # Check if file exists
+        if not os.path.exists(chart_path):
+            raise HTTPException(status_code=404, detail="Chart not found")
+            
+        # Return HTML response
+        with open(chart_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+            
+        return HTMLResponse(content=html_content)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving chart {chart_file}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error serving chart")
+
+
+@app.get("/charts/{chart_file}/embed")
+async def serve_chart_embed(chart_file: str):
+    """
+    Serve chart as embeddable iframe content.
+    
+    Args:
+        chart_file: The chart filename
+        
+    Returns:
+        Minimal HTML for embedding
+    """
+    try:
+        # Same validation as serve_chart
+        if ".." in chart_file or "/" in chart_file or "\\" in chart_file:
+            raise HTTPException(status_code=400, detail="Invalid chart file name")
+            
+        if not chart_file.endswith('.html'):
+            raise HTTPException(status_code=400, detail="Invalid file type")
+            
+        charts_dir = "static/charts"
+        chart_path = os.path.join(charts_dir, chart_file)
+        
+        if not os.path.exists(chart_path):
+            raise HTTPException(status_code=404, detail="Chart not found")
+            
+        # Return as FileResponse with iframe-friendly headers
+        return FileResponse(
+            path=chart_path,
+            media_type="text/html",
+            headers={
+                "X-Frame-Options": "SAMEORIGIN",
+                "Content-Security-Policy": "frame-ancestors 'self' localhost:*",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving chart embed {chart_file}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error serving chart")
 
 
 # Include multi-agent system routes

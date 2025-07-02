@@ -114,13 +114,22 @@ class DataFormatterAgent(BaseAgent):
         response = await self.llm_call(messages, temperature=0.1)
         
         try:
-            return json.loads(response)
+            parsed_response = json.loads(response)
+            # Enable charts for visualization requests
+            if any(keyword in query.lower() for keyword in ['chart', 'graph', 'plot', 'visualize', 'draw']):
+                parsed_response["includes_charts"] = True
+                if "visual_elements" not in parsed_response:
+                    parsed_response["visual_elements"] = ["charts", "summaries"]
+                elif "charts" not in parsed_response["visual_elements"]:
+                    parsed_response["visual_elements"].append("charts")
+            return parsed_response
         except json.JSONDecodeError:
-            # Fallback strategy
+            # Fallback strategy - enable charts for visualization requests
+            includes_charts = any(keyword in query.lower() for keyword in ['chart', 'graph', 'plot', 'visualize', 'draw'])
             return {
                 "format_type": "comprehensive_report",
-                "includes_charts": False,
-                "visual_elements": ["summaries", "bullet_points"],
+                "includes_charts": includes_charts,
+                "visual_elements": ["charts", "summaries"] if includes_charts else ["summaries", "bullet_points"],
                 "detail_level": "medium",
                 "structure": "executive_summary_first"
             }
@@ -209,36 +218,84 @@ class DataFormatterAgent(BaseAgent):
         return sources
     
     def _create_chart_data(self, sql_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Create chart data structure for visualization"""
+        """Create actual chart using Plotly and return chart info"""
+        
+        logger.info(f"Chart generation called with sql_data: {sql_data is not None}")
         
         if not sql_data or not sql_data.get("data"):
+            logger.warning(f"No SQL data available for chart generation: sql_data={sql_data}")
             return None
         
         data_rows = sql_data.get("data", [])
         columns = sql_data.get("columns", [])
         
+        logger.info(f"Chart generation data: {len(data_rows)} rows, columns: {columns}")
+        
         if not data_rows or not columns:
+            logger.warning(f"Insufficient data for chart: rows={len(data_rows) if data_rows else 0}, columns={len(columns) if columns else 0}")
             return None
         
-        # Determine chart type based on data structure
-        chart_config = {
-            "type": "table",  # Default to table
-            "data": data_rows[:10],  # Limit to first 10 rows
-            "columns": columns,
-            "title": "Query Results",
-            "description": f"Showing {min(len(data_rows), 10)} of {len(data_rows)} results"
-        }
-        
-        # Try to create more specific chart types based on column names
-        if self._has_numeric_columns(data_rows, columns):
-            if self._has_time_series_data(columns):
-                chart_config["type"] = "line_chart"
-                chart_config["description"] = "Performance over time"
-            elif len(data_rows) <= 20:
-                chart_config["type"] = "bar_chart"
-                chart_config["description"] = "Comparative analysis"
-        
-        return chart_config
+        try:
+            # Import chart generator
+            from utils.chart_generator import chart_generator
+            
+            # Determine chart title from query context
+            chart_title = self._generate_chart_title(columns, len(data_rows))
+            
+            # Generate chart using the chart generator
+            chart_info = chart_generator.generate_chart(
+                data=data_rows,
+                columns=columns,
+                chart_type="auto",
+                title=chart_title
+            )
+            
+            if chart_info:
+                logger.info(f"Chart generated successfully: {chart_info['chart_file']}")
+                return {
+                    "chart_id": chart_info["chart_id"],
+                    "chart_file": chart_info["chart_file"],
+                    "chart_type": chart_info["chart_type"],
+                    "title": chart_info["title"],
+                    "data_points": chart_info["data_points"],
+                    "description": f"Interactive {chart_info['chart_type']} chart with {chart_info['data_points']} data points"
+                }
+            else:
+                logger.warning("Chart generation failed, falling back to table")
+                return {
+                    "type": "table",
+                    "data": data_rows[:10],
+                    "columns": columns,
+                    "title": "Query Results",
+                    "description": f"Data table with {len(data_rows)} rows"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error creating chart: {str(e)}")
+            return {
+                "type": "table",
+                "data": data_rows[:10],
+                "columns": columns,
+                "title": "Query Results",
+                "description": f"Data table with {len(data_rows)} rows (chart generation failed)"
+            }
+    
+    def _generate_chart_title(self, columns: List[str], row_count: int) -> str:
+        """Generate an appropriate chart title based on columns and data"""
+        try:
+            # Look for meaningful column names to create title
+            if any('fund' in col.lower() for col in columns):
+                return "Fund Analysis"
+            elif any('portfolio' in col.lower() for col in columns):
+                return "Portfolio Analysis"
+            elif any('weight' in col.lower() or 'allocation' in col.lower() for col in columns):
+                return "Allocation Analysis"
+            elif any('performance' in col.lower() or 'return' in col.lower() for col in columns):
+                return "Performance Analysis"
+            else:
+                return f"Data Analysis ({row_count} records)"
+        except:
+            return "Query Results"
     
     def _has_numeric_columns(self, data: List[Dict], columns: List[str]) -> bool:
         """Check if data has numeric columns suitable for charting"""

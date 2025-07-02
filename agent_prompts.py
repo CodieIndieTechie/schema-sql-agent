@@ -117,6 +117,15 @@ def get_dynamic_system_prompt(database_info: Dict, user_schema: Optional[str] = 
 - Stop after answering - don't ask follow-up questions unless clarification is needed
 - If data spans multiple schemas/databases, clearly indicate the source
 
+**📊 CHART AND VISUALIZATION GUIDELINES:**
+- When users request charts, graphs, plots, or visualizations:
+  1. **ALWAYS execute SQL queries first** to retrieve the actual data
+  2. Return the data so it can be automatically converted to charts
+  3. **NEVER provide manual instructions** for creating charts - the system will generate them automatically
+- Keywords that indicate chart requests: "chart", "graph", "plot", "visualize", "draw", "show chart"
+- Focus on getting the right data structure for effective visualization
+- For charts, ensure data has meaningful columns that can be plotted (e.g., categories and values)
+
 **🚨 IMPORTANT RULES:**
 - You can query any accessible database/schema, but focus on the user's working context by default
 - Always respect data privacy - only access what's necessary to answer the question

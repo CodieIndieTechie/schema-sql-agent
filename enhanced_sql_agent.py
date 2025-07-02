@@ -15,6 +15,13 @@ from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.io import to_html
+import uuid
+import os
+import re
 
 from settings import settings
 from database_discovery import discovery_service
@@ -60,6 +67,461 @@ class EnhancedMultiDatabaseSQLAgent:
         self._discover_databases()
         
         logger.info(f"✅ Enhanced SQL Agent initialized for {user_email or 'system'} in {discovery_mode} mode")
+    
+    def _is_chart_request(self, query: str) -> bool:
+        """Detect if the user is requesting a chart/visualization."""
+        chart_keywords = [
+            'chart', 'graph', 'plot', 'visualize', 'draw', 'show chart',
+            'bar chart', 'pie chart', 'line chart', 'scatter plot',
+            'histogram', 'box plot', 'heatmap', 'visualization'
+        ]
+        query_lower = query.lower()
+        return any(keyword in query_lower for keyword in chart_keywords)
+    
+    def _extract_sql_data_from_result(self, result: Dict[str, Any]) -> Optional[List[tuple]]:
+        """Extract SQL data from agent result intermediate steps."""
+        try:
+            intermediate_steps = result.get('intermediate_steps', [])
+            
+            # Look for SQL query results in intermediate steps
+            for step in intermediate_steps:
+                if isinstance(step, (list, tuple)) and len(step) >= 2:
+                    action, observation = step[0], step[1]
+                    
+                    # Check if this is a SQL query tool result
+                    if hasattr(action, 'tool') and 'sql' in str(action.tool).lower():
+                        # Try to parse the observation as SQL results
+                        if isinstance(observation, str):
+                            # Look for list/tuple patterns in the observation
+                            import ast
+                            try:
+                                # Try to extract data that looks like SQL results
+                                if '[(' in observation and ')]' in observation:
+                                    # Extract the list of tuples
+                                    start = observation.find('[(')
+                                    end = observation.find(')]') + 2
+                                    data_str = observation[start:end]
+                                    data = ast.literal_eval(data_str)
+                                    return data
+                            except:
+                                continue
+            
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to extract SQL data: {e}")
+            return None
+    
+    def _generate_chart_from_data(self, data: List[tuple], query: str) -> Optional[Dict[str, str]]:
+        """Generate a chart from SQL data using pandas and plotly."""
+        try:
+            if not data or len(data) == 0:
+                return None
+            
+            # Convert to pandas DataFrame
+            # Assume first row represents the structure
+            if len(data[0]) == 2:
+                # Two columns - good for bar charts, pie charts
+                df = pd.DataFrame(data, columns=['category', 'value'])
+                
+                # Determine chart type from query
+                query_lower = query.lower()
+                if 'pie' in query_lower:
+                    chart_type = 'pie'
+                elif 'line' in query_lower:
+                    chart_type = 'line'
+                else:
+                    chart_type = 'bar'  # Default
+                
+                # Generate appropriate chart
+                if chart_type == 'pie':
+                    fig = px.pie(df, names='category', values='value', 
+                               title=self._generate_chart_title(query))
+                elif chart_type == 'line':
+                    fig = px.line(df, x='category', y='value', 
+                                title=self._generate_chart_title(query))
+                else:  # bar chart
+                    fig = px.bar(df, x='category', y='value', 
+                               title=self._generate_chart_title(query))
+                
+            else:
+                # Multiple columns - use first column as x, second as y
+                columns = [f'col_{i}' for i in range(len(data[0]))]
+                df = pd.DataFrame(data, columns=columns)
+                fig = px.bar(df, x=columns[0], y=columns[1], 
+                           title=self._generate_chart_title(query))
+                chart_type = 'bar'
+            
+            # Save chart as HTML file optimized for iframe embedding
+            chart_id = str(uuid.uuid4())
+            chart_filename = f"chart_{chart_id}.html"
+            charts_dir = "static/charts"
+            os.makedirs(charts_dir, exist_ok=True)
+            
+            chart_path = os.path.join(charts_dir, chart_filename)
+            
+            # Generate iframe-friendly HTML
+            fig.write_html(
+                chart_path,
+                config={
+                    'displayModeBar': False,  # Hide plotly toolbar for cleaner embed
+                    'responsive': True        # Make chart responsive
+                },
+                div_id=f"chart-{chart_id}",
+                include_plotlyjs='cdn'    # Use CDN for smaller file size
+            )
+            
+            logger.info(f"📊 Chart generated: {chart_filename}")
+            
+            return {
+                'chart_file': chart_filename,
+                'chart_type': chart_type,
+                'chart_path': chart_path
+            }
+            
+        except Exception as e:
+            logger.error(f"Chart generation failed: {e}")
+            return None
+    
+    def _generate_chart_title(self, query: str) -> str:
+        """Generate a meaningful chart title from the user query."""
+        # Simple title generation based on query content
+        if 'mutual fund' in query.lower():
+            return "Mutual Fund Portfolio Analysis"
+        elif 'portfolio' in query.lower():
+            return "Portfolio Analysis"
+        elif 'weight' in query.lower():
+            return "Weight Distribution"
+        else:
+            return "Data Visualization"
+    
+    def _detect_calculation_type(self, query: str) -> Optional[str]:
+        """Detect what type of calculation is being requested."""
+        query_lower = query.lower()
+        
+        # Financial risk calculations
+        risk_keywords = ['risk', 'volatility', 'sharpe', 'beta', 'var', 'standard deviation', 'drawdown']
+        if any(keyword in query_lower for keyword in risk_keywords):
+            return 'risk_analysis'
+        
+        # Performance calculations
+        performance_keywords = ['return', 'performance', 'growth', 'roi', 'gains', 'profit']
+        if any(keyword in query_lower for keyword in performance_keywords):
+            return 'performance_analysis'
+        
+        # Correlation analysis
+        correlation_keywords = ['correlation', 'relationship', 'connected', 'correlated']
+        if any(keyword in query_lower for keyword in correlation_keywords):
+            return 'correlation_analysis'
+        
+        # Statistical analysis
+        stats_keywords = ['average', 'mean', 'median', 'summary', 'statistics', 'stats']
+        if any(keyword in query_lower for keyword in stats_keywords):
+            return 'statistical_analysis'
+        
+        # Comparison analysis
+        comparison_keywords = ['compare', 'vs', 'versus', 'against', 'difference', 'better', 'worse']
+        if any(keyword in query_lower for keyword in comparison_keywords):
+            return 'comparison_analysis'
+        
+        return None
+    
+    def _perform_calculations(self, df: pd.DataFrame, calc_type: str, query: str) -> Dict[str, Any]:
+        """Perform calculations on the DataFrame based on the calculation type."""
+        try:
+            results = {}
+            
+            if calc_type == 'risk_analysis':
+                results = self._calculate_risk_metrics(df)
+            elif calc_type == 'performance_analysis':
+                results = self._calculate_performance_metrics(df)
+            elif calc_type == 'correlation_analysis':
+                results = self._calculate_correlation_metrics(df)
+            elif calc_type == 'statistical_analysis':
+                results = self._calculate_statistical_metrics(df)
+            elif calc_type == 'comparison_analysis':
+                results = self._calculate_comparison_metrics(df)
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Calculation failed for {calc_type}: {e}")
+            return {}
+    
+    def _calculate_risk_metrics(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate financial risk metrics."""
+        results = {}
+        
+        # Look for numeric columns that could represent returns or values
+        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+        
+        if len(numeric_cols) > 0:
+            for col in numeric_cols:
+                if 'return' in col.lower() or 'price' in col.lower() or 'value' in col.lower():
+                    data = df[col].dropna()
+                    
+                    if len(data) > 1:
+                        results[f'{col}_volatility'] = data.std()
+                        results[f'{col}_mean_return'] = data.mean()
+                        
+                        # Sharpe ratio (assuming risk-free rate = 0 for simplicity)
+                        if data.std() != 0:
+                            results[f'{col}_sharpe_ratio'] = data.mean() / data.std()
+                        
+                        # Max drawdown
+                        if 'price' in col.lower() or 'value' in col.lower():
+                            running_max = data.expanding().max()
+                            drawdown = (data - running_max) / running_max
+                            results[f'{col}_max_drawdown'] = drawdown.min()
+        
+        return results
+    
+    def _calculate_performance_metrics(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate performance metrics."""
+        results = {}
+        
+        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+        
+        for col in numeric_cols:
+            data = df[col].dropna()
+            
+            if len(data) > 0:
+                results[f'{col}_total'] = data.sum()
+                results[f'{col}_average'] = data.mean()
+                results[f'{col}_max'] = data.max()
+                results[f'{col}_min'] = data.min()
+                
+                # Growth rate (if we have time series data)
+                if len(data) > 1:
+                    first_value = data.iloc[0]
+                    last_value = data.iloc[-1]
+                    if first_value != 0:
+                        results[f'{col}_total_growth'] = ((last_value - first_value) / first_value) * 100
+        
+        return results
+    
+    def _calculate_correlation_metrics(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate correlation metrics between numeric columns."""
+        results = {}
+        
+        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+        
+        if len(numeric_cols) >= 2:
+            correlation_matrix = df[numeric_cols].corr()
+            
+            # Find strongest correlations
+            correlations = []
+            for i in range(len(numeric_cols)):
+                for j in range(i + 1, len(numeric_cols)):
+                    col1, col2 = numeric_cols[i], numeric_cols[j]
+                    corr_value = correlation_matrix.loc[col1, col2]
+                    if not pd.isna(corr_value):
+                        correlations.append({
+                            'pair': f'{col1} vs {col2}',
+                            'correlation': corr_value
+                        })
+            
+            # Sort by absolute correlation value
+            correlations.sort(key=lambda x: abs(x['correlation']), reverse=True)
+            results['top_correlations'] = correlations[:5]  # Top 5
+        
+        return results
+    
+    def _calculate_statistical_metrics(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate basic statistical metrics."""
+        results = {}
+        
+        # Overall data summary
+        results['total_records'] = len(df)
+        results['total_columns'] = len(df.columns)
+        
+        # Numeric column statistics
+        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+        
+        for col in numeric_cols:
+            data = df[col].dropna()
+            if len(data) > 0:
+                results[f'{col}_count'] = len(data)
+                results[f'{col}_mean'] = data.mean()
+                results[f'{col}_median'] = data.median()
+                results[f'{col}_std'] = data.std()
+        
+        return results
+    
+    def _calculate_comparison_metrics(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate comparison metrics between different categories."""
+        results = {}
+        
+        # Look for categorical columns to group by
+        categorical_cols = df.select_dtypes(include=['object', 'category']).columns
+        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+        
+        if len(categorical_cols) > 0 and len(numeric_cols) > 0:
+            cat_col = categorical_cols[0]  # Use first categorical column
+            num_col = numeric_cols[0]     # Use first numeric column
+            
+            # Group by categorical column and calculate statistics
+            grouped = df.groupby(cat_col)[num_col].agg(['mean', 'sum', 'count'])
+            
+            # Convert to dictionary format
+            for category in grouped.index:
+                results[f'{category}_average'] = grouped.loc[category, 'mean']
+                results[f'{category}_total'] = grouped.loc[category, 'sum']
+                results[f'{category}_count'] = grouped.loc[category, 'count']
+            
+            # Find best and worst performers
+            best_performer = grouped['mean'].idxmax()
+            worst_performer = grouped['mean'].idxmin()
+            
+            results['best_performer'] = best_performer
+            results['worst_performer'] = worst_performer
+            results['best_performer_value'] = grouped.loc[best_performer, 'mean']
+            results['worst_performer_value'] = grouped.loc[worst_performer, 'mean']
+        
+        return results
+    
+    def _format_calculation_insights(self, calculations: Dict[str, Any], calc_type: str) -> str:
+        """Format calculation results into human-readable insights."""
+        if not calculations:
+            return ""
+        
+        insights = []
+        
+        if calc_type == 'risk_analysis':
+            for key, value in calculations.items():
+                if 'sharpe_ratio' in key:
+                    if value > 1.0:
+                        insights.append(f"📈 Excellent risk-adjusted returns (Sharpe ratio: {value:.2f})")
+                    elif value > 0.5:
+                        insights.append(f"📊 Good risk-adjusted returns (Sharpe ratio: {value:.2f})")
+                    else:
+                        insights.append(f"⚠️ Low risk-adjusted returns (Sharpe ratio: {value:.2f})")
+                elif 'volatility' in key:
+                    col_name = key.replace('_volatility', '')
+                    insights.append(f"📊 {col_name} volatility: {value:.2f}")
+                elif 'max_drawdown' in key:
+                    insights.append(f"📉 Maximum drawdown: {value:.2%}")
+        
+        elif calc_type == 'performance_analysis':
+            for key, value in calculations.items():
+                if 'total_growth' in key:
+                    col_name = key.replace('_total_growth', '')
+                    if value > 0:
+                        insights.append(f"📈 {col_name} gained {value:.1f}% over the period")
+                    else:
+                        insights.append(f"📉 {col_name} declined {abs(value):.1f}% over the period")
+                elif 'average' in key:
+                    col_name = key.replace('_average', '')
+                    insights.append(f"📊 Average {col_name}: {value:.2f}")
+        
+        elif calc_type == 'comparison_analysis':
+            if 'best_performer' in calculations:
+                best = calculations['best_performer']
+                best_value = calculations.get('best_performer_value', 0)
+                worst = calculations.get('worst_performer', '')
+                worst_value = calculations.get('worst_performer_value', 0)
+                
+                insights.append(f"🏆 Best performer: {best} ({best_value:.2f})")
+                if worst:
+                    insights.append(f"📉 Worst performer: {worst} ({worst_value:.2f})")
+        
+        elif calc_type == 'statistical_analysis':
+            if 'total_records' in calculations:
+                insights.append(f"📊 Dataset contains {calculations['total_records']} records")
+            
+            for key, value in calculations.items():
+                if 'mean' in key and not key.startswith('total'):
+                    col_name = key.replace('_mean', '')
+                    insights.append(f"📈 Average {col_name}: {value:.2f}")
+        
+        elif calc_type == 'correlation_analysis':
+            if 'top_correlations' in calculations:
+                correlations = calculations['top_correlations']
+                if correlations:
+                    insights.append("🔗 Strongest correlations:")
+                    for corr in correlations[:3]:  # Top 3
+                        strength = "Strong" if abs(corr['correlation']) > 0.7 else "Moderate" if abs(corr['correlation']) > 0.3 else "Weak"
+                        insights.append(f"   • {corr['pair']}: {strength} ({corr['correlation']:.2f})")
+        
+        return "\n".join(insights)
+    
+    def _should_include_chart(self, query: str, df: pd.DataFrame) -> bool:
+        """Determine if a chart should be included in the response."""
+        # Always include chart if explicitly requested
+        if self._is_chart_request(query):
+            return True
+        
+        # Include chart for comparison queries with reasonable data size
+        if self._detect_calculation_type(query) == 'comparison_analysis' and len(df) <= 50:
+            return True
+        
+        # Include chart for performance analysis with time series data
+        if self._detect_calculation_type(query) == 'performance_analysis' and len(df) > 2:
+            return True
+        
+        return False
+    
+    def _should_include_table(self, query: str, df: pd.DataFrame) -> bool:
+        """Determine if a data table should be included in the response."""
+        # Include table for small datasets or when explicitly requested
+        table_keywords = ['table', 'data', 'records', 'list', 'show all']
+        if any(keyword in query.lower() for keyword in table_keywords):
+            return True
+        
+        # Include table for small datasets (< 10 rows)
+        if len(df) <= 10:
+            return True
+        
+        return False
+    
+    def _generate_mixed_response(self, original_response: str, df: pd.DataFrame, 
+                                calculations: Dict[str, Any], calc_type: str, 
+                                query: str) -> Dict[str, Any]:
+        """Generate a mixed response with text, calculations, and potentially charts."""
+        response_parts = []
+        
+        # Start with original agent response
+        if original_response:
+            response_parts.append(original_response)
+        
+        # Add calculation insights
+        if calculations:
+            insights = self._format_calculation_insights(calculations, calc_type)
+            if insights:
+                response_parts.append(f"\n🔍 **Analysis Results:**\n{insights}")
+        
+        # Generate chart if appropriate
+        chart_info = None
+        if self._should_include_chart(query, df):
+            chart_info = self._generate_chart_from_data(
+                df.values.tolist() if len(df) > 0 else [], 
+                query
+            )
+        
+        # Generate data table if appropriate
+        table_html = None
+        if self._should_include_table(query, df):
+            # Create a clean HTML table
+            table_html = df.head(10).to_html(classes='data-table', table_id='analysis-table')
+        
+        # Combine all response parts
+        combined_response = "\n\n".join(response_parts)
+        
+        result = {
+            'response': combined_response,
+            'has_calculations': bool(calculations),
+            'calculation_type': calc_type if calculations else None
+        }
+        
+        # Add chart info if generated
+        if chart_info:
+            result['chart_file'] = chart_info['chart_file']
+            result['chart_type'] = chart_info['chart_type']
+        
+        # Add table if generated
+        if table_html:
+            result['data_table'] = table_html
+        
+        return result
     
     def _discover_databases(self):
         """Discover database structures based on the configured mode."""
@@ -246,14 +708,92 @@ class EnhancedMultiDatabaseSQLAgent:
                 from schema_migration import email_to_schema_name
                 user_schema = email_to_schema_name(self.user_email)
             
-            return {
-                'success': True,
-                'response': result.get("output", ""),
-                'database': database_name,
-                'schema': schema_name or user_schema,
-                'session_id': session_id,
-                'intermediate_steps': result.get("intermediate_steps", [])
-            }
+            # Enhanced processing: Extract SQL data and perform calculations
+            sql_data = self._extract_sql_data_from_result(result)
+            df = None
+            calculations = {}
+            calc_type = None
+            
+            if sql_data:
+                logger.info(f"📊 SQL data extracted: {len(sql_data)} rows")
+                
+                # Convert to pandas DataFrame for analysis
+                try:
+                    # Smart column detection for DataFrame creation
+                    if len(sql_data) > 0 and len(sql_data[0]) == 2:
+                        df = pd.DataFrame(sql_data, columns=['category', 'value'])
+                    else:
+                        # Generate generic column names
+                        num_cols = len(sql_data[0]) if sql_data else 0
+                        columns = [f'col_{i}' for i in range(num_cols)]
+                        df = pd.DataFrame(sql_data, columns=columns)
+                    
+                    logger.info(f"🐼 DataFrame created: {df.shape}")
+                    
+                    # Detect and perform calculations if requested
+                    calc_type = self._detect_calculation_type(query)
+                    if calc_type:
+                        logger.info(f"🔍 Calculation type detected: {calc_type}")
+                        calculations = self._perform_calculations(df, calc_type, query)
+                        logger.info(f"📊 Calculations completed: {len(calculations)} metrics")
+                    
+                except Exception as e:
+                    logger.error(f"DataFrame processing failed: {e}")
+                    df = None
+            
+            # Generate mixed response (text + calculations + charts)
+            original_response = result.get("output", "")
+            
+            if df is not None and (calculations or self._is_chart_request(query)):
+                # Generate enhanced mixed response
+                mixed_response = self._generate_mixed_response(
+                    original_response, df, calculations, calc_type, query
+                )
+                
+                response_dict = {
+                    'success': True,
+                    'response': mixed_response['response'],
+                    'database': database_name,
+                    'schema': schema_name or user_schema,
+                    'session_id': session_id,
+                    'intermediate_steps': result.get("intermediate_steps", []),
+                    'has_calculations': mixed_response.get('has_calculations', False),
+                    'calculation_type': mixed_response.get('calculation_type')
+                }
+                
+                # Add chart info if generated
+                if 'chart_file' in mixed_response:
+                    response_dict['chart_file'] = mixed_response['chart_file']
+                    response_dict['chart_type'] = mixed_response['chart_type']
+                    logger.info(f"📊 Chart added to response: {mixed_response['chart_file']}")
+                
+                # Add data table if generated
+                if 'data_table' in mixed_response:
+                    response_dict['data_table'] = mixed_response['data_table']
+                    logger.info("📋 Data table added to response")
+                
+            else:
+                # Fallback to simple chart generation for chart requests
+                chart_info = None
+                if self._is_chart_request(query) and sql_data:
+                    chart_info = self._generate_chart_from_data(sql_data, query)
+                
+                response_dict = {
+                    'success': True,
+                    'response': original_response,
+                    'database': database_name,
+                    'schema': schema_name or user_schema,
+                    'session_id': session_id,
+                    'intermediate_steps': result.get("intermediate_steps", [])
+                }
+                
+                # Add chart info if chart was generated
+                if chart_info:
+                    response_dict['chart_file'] = chart_info['chart_file']
+                    response_dict['chart_type'] = chart_info['chart_type']
+                    logger.info(f"📊 Chart added to response: {chart_info['chart_file']}")
+            
+            return response_dict
             
         except Exception as e:
             logger.error(f"❌ Query processing failed: {e}")
