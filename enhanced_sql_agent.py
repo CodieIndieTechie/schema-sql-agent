@@ -380,67 +380,88 @@ class EnhancedMultiDatabaseSQLAgent:
         return results
     
     def _format_calculation_insights(self, calculations: Dict[str, Any], calc_type: str) -> str:
-        """Format calculation results into human-readable insights."""
+        """Format calculation results into human-readable insights with rich formatting."""
         if not calculations:
             return ""
         
         insights = []
         
         if calc_type == 'risk_analysis':
+            insights.append("## 📊 **Risk Analysis Results**\n")
+            risk_items = []
             for key, value in calculations.items():
                 if 'sharpe_ratio' in key:
                     if value > 1.0:
-                        insights.append(f"📈 Excellent risk-adjusted returns (Sharpe ratio: {value:.2f})")
+                        risk_items.append(f"• 📈 **Excellent** risk-adjusted returns (*Sharpe ratio: {value:.2f}*)")
                     elif value > 0.5:
-                        insights.append(f"📊 Good risk-adjusted returns (Sharpe ratio: {value:.2f})")
+                        risk_items.append(f"• 📊 **Good** risk-adjusted returns (*Sharpe ratio: {value:.2f}*)")
                     else:
-                        insights.append(f"⚠️ Low risk-adjusted returns (Sharpe ratio: {value:.2f})")
+                        risk_items.append(f"• ⚠️ **Low** risk-adjusted returns (*Sharpe ratio: {value:.2f}*)")
                 elif 'volatility' in key:
-                    col_name = key.replace('_volatility', '')
-                    insights.append(f"📊 {col_name} volatility: {value:.2f}")
+                    col_name = key.replace('_volatility', '').replace('_', ' ').title()
+                    risk_items.append(f"• 📊 **{col_name}** volatility: ***{value:.2f}%***")
                 elif 'max_drawdown' in key:
-                    insights.append(f"📉 Maximum drawdown: {value:.2%}")
+                    risk_items.append(f"• 📉 **Maximum drawdown**: ***{value:.2%}***")
+            
+            if risk_items:
+                insights.extend(risk_items)
         
         elif calc_type == 'performance_analysis':
+            insights.append("## 📈 **Performance Analysis Results**\n")
+            perf_items = []
             for key, value in calculations.items():
                 if 'total_growth' in key:
-                    col_name = key.replace('_total_growth', '')
+                    col_name = key.replace('_total_growth', '').replace('_', ' ').title()
                     if value > 0:
-                        insights.append(f"📈 {col_name} gained {value:.1f}% over the period")
+                        perf_items.append(f"• 📈 **{col_name}** gained ***{value:.1f}%*** over the period")
                     else:
-                        insights.append(f"📉 {col_name} declined {abs(value):.1f}% over the period")
+                        perf_items.append(f"• 📉 **{col_name}** declined ***{abs(value):.1f}%*** over the period")
                 elif 'average' in key:
-                    col_name = key.replace('_average', '')
-                    insights.append(f"📊 Average {col_name}: {value:.2f}")
+                    col_name = key.replace('_average', '').replace('_', ' ').title()
+                    perf_items.append(f"• 📊 **Average {col_name}**: ***{value:.2f}***")
+            
+            if perf_items:
+                insights.extend(perf_items)
         
         elif calc_type == 'comparison_analysis':
+            insights.append("## 🏆 **Comparison Analysis Results**\n")
+            comp_items = []
             if 'best_performer' in calculations:
                 best = calculations['best_performer']
                 best_value = calculations.get('best_performer_value', 0)
                 worst = calculations.get('worst_performer', '')
                 worst_value = calculations.get('worst_performer_value', 0)
                 
-                insights.append(f"🏆 Best performer: {best} ({best_value:.2f})")
+                comp_items.append(f"• 🏆 **Best performer**: ***{best}*** ({best_value:.2f})")
                 if worst:
-                    insights.append(f"📉 Worst performer: {worst} ({worst_value:.2f})")
+                    comp_items.append(f"• 📉 **Worst performer**: ***{worst}*** ({worst_value:.2f})")
+            
+            if comp_items:
+                insights.extend(comp_items)
         
         elif calc_type == 'statistical_analysis':
+            insights.append("## 📊 **Statistical Analysis Results**\n")
+            stat_items = []
             if 'total_records' in calculations:
-                insights.append(f"📊 Dataset contains {calculations['total_records']} records")
+                stat_items.append(f"• 📊 **Dataset size**: ***{calculations['total_records']:,} records***")
             
             for key, value in calculations.items():
                 if 'mean' in key and not key.startswith('total'):
-                    col_name = key.replace('_mean', '')
-                    insights.append(f"📈 Average {col_name}: {value:.2f}")
+                    col_name = key.replace('_mean', '').replace('_', ' ').title()
+                    stat_items.append(f"• 📈 **Average {col_name}**: ***{value:.2f}***")
+            
+            if stat_items:
+                insights.extend(stat_items)
         
         elif calc_type == 'correlation_analysis':
+            insights.append("## 🔗 **Correlation Analysis Results**\n")
             if 'top_correlations' in calculations:
                 correlations = calculations['top_correlations']
                 if correlations:
-                    insights.append("🔗 Strongest correlations:")
-                    for corr in correlations[:3]:  # Top 3
-                        strength = "Strong" if abs(corr['correlation']) > 0.7 else "Moderate" if abs(corr['correlation']) > 0.3 else "Weak"
-                        insights.append(f"   • {corr['pair']}: {strength} ({corr['correlation']:.2f})")
+                    insights.append("### **Strongest Correlations:**\n")
+                    for i, corr in enumerate(correlations[:5], 1):  # Top 5
+                        strength = "**Strong**" if abs(corr['correlation']) > 0.7 else "*Moderate*" if abs(corr['correlation']) > 0.3 else "Weak"
+                        insights.append(f"{i}. {corr['pair']}: {strength} correlation (***{corr['correlation']:.3f}***)")
         
         return "\n".join(insights)
     
@@ -476,18 +497,25 @@ class EnhancedMultiDatabaseSQLAgent:
     def _generate_mixed_response(self, original_response: str, df: pd.DataFrame, 
                                 calculations: Dict[str, Any], calc_type: str, 
                                 query: str) -> Dict[str, Any]:
-        """Generate a mixed response with text, calculations, and potentially charts."""
+        """Generate a comprehensive mixed response with rich formatting, text, calculations, and visuals."""
         response_parts = []
         
-        # Start with original agent response
+        # Format and enhance original agent response
         if original_response:
-            response_parts.append(original_response)
+            formatted_response = self._enhance_response_formatting(original_response)
+            response_parts.append(formatted_response)
         
-        # Add calculation insights
+        # Add calculation insights with rich formatting
         if calculations:
             insights = self._format_calculation_insights(calculations, calc_type)
             if insights:
-                response_parts.append(f"\n🔍 **Analysis Results:**\n{insights}")
+                response_parts.append(f"\n---\n\n{insights}")
+        
+        # Add data summary if we have meaningful data
+        if len(df) > 0:
+            data_summary = self._format_data_summary(df, query)
+            if data_summary:
+                response_parts.append(f"\n---\n\n{data_summary}")
         
         # Generate chart if appropriate
         chart_info = None
@@ -496,20 +524,29 @@ class EnhancedMultiDatabaseSQLAgent:
                 df.values.tolist() if len(df) > 0 else [], 
                 query
             )
+            if chart_info:
+                response_parts.append(f"\n📊 **Chart Generated**: {chart_info.get('chart_type', 'Data Visualization')}")
         
-        # Generate data table if appropriate
-        table_html = None
+        # Generate formatted data table if appropriate
+        table_content = None
         if self._should_include_table(query, df):
-            # Create a clean HTML table
-            table_html = df.head(10).to_html(classes='data-table', table_id='analysis-table')
+            table_content = self._format_data_table(df.head(10))
+            if table_content:
+                response_parts.append(f"\n---\n\n{table_content}")
         
-        # Combine all response parts
+        # Add key insights or recommendations
+        key_insights = self._generate_key_insights(df, calculations, calc_type, query)
+        if key_insights:
+            response_parts.append(f"\n---\n\n{key_insights}")
+        
+        # Combine all response parts with proper spacing
         combined_response = "\n\n".join(response_parts)
         
         result = {
             'response': combined_response,
             'has_calculations': bool(calculations),
-            'calculation_type': calc_type if calculations else None
+            'calculation_type': calc_type if calculations else None,
+            'formatted_response': True
         }
         
         # Add chart info if generated
@@ -517,9 +554,9 @@ class EnhancedMultiDatabaseSQLAgent:
             result['chart_file'] = chart_info['chart_file']
             result['chart_type'] = chart_info['chart_type']
         
-        # Add table if generated
-        if table_html:
-            result['data_table'] = table_html
+        # Add formatted table if generated
+        if table_content:
+            result['data_table'] = table_content
         
         return result
     

@@ -1,5 +1,9 @@
 
 import { MessageCircle, User } from "lucide-react";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 
 interface Message {
   id: string;
@@ -40,9 +44,48 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
             ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-blue-500/20' 
             : 'bg-white border border-blue-100/50 shadow-blue-500/10'
         }`}>
-          <p className={`text-sm leading-relaxed ${isUser ? 'text-white' : 'text-gray-700'}`}>
-            {message.content}
-          </p>
+          {isUser ? (
+            <p className={`text-sm leading-relaxed ${isUser ? 'text-white' : 'text-gray-700'}`}>
+              {message.content}
+            </p>
+          ) : (
+            <div className={`text-sm leading-relaxed ${isUser ? 'text-white' : 'text-gray-700'} prose prose-sm max-w-none`}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeRaw, rehypeSanitize]}
+                components={{
+                  // Custom styling for markdown elements
+                  h1: ({node, ...props}) => <h1 className="text-lg font-bold mb-2 text-gray-800" {...props} />,
+                  h2: ({node, ...props}) => <h2 className="text-base font-bold mb-2 text-gray-800" {...props} />,
+                  h3: ({node, ...props}) => <h3 className="text-sm font-bold mb-1 text-gray-800" {...props} />,
+                  p: ({node, ...props}) => <p className="mb-2 last:mb-0" {...props} />,
+                  strong: ({node, ...props}) => <strong className="font-bold text-gray-900" {...props} />,
+                  em: ({node, ...props}) => <em className="italic" {...props} />,
+                  ul: ({node, ...props}) => <ul className="list-disc ml-4 mb-2" {...props} />,
+                  ol: ({node, ...props}) => <ol className="list-decimal ml-4 mb-2" {...props} />,
+                  li: ({node, ...props}) => <li className="mb-1" {...props} />,
+                  code: ({node, inline, ...props}) => 
+                    inline ? (
+                      <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono text-gray-800" {...props} />
+                    ) : (
+                      <code className="block bg-gray-100 p-2 rounded text-xs font-mono text-gray-800 overflow-x-auto" {...props} />
+                    ),
+                  pre: ({node, ...props}) => <pre className="bg-gray-100 p-2 rounded mb-2 overflow-x-auto" {...props} />,
+                  table: ({node, ...props}) => (
+                    <div className="overflow-x-auto mb-2">
+                      <table className="min-w-full border-collapse border border-gray-300 text-xs" {...props} />
+                    </div>
+                  ),
+                  th: ({node, ...props}) => <th className="border border-gray-300 px-2 py-1 bg-gray-50 font-bold text-left" {...props} />,
+                  td: ({node, ...props}) => <td className="border border-gray-300 px-2 py-1" {...props} />,
+                  hr: ({node, ...props}) => <hr className="my-3 border-gray-300" {...props} />,
+                  blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-blue-500 pl-3 italic text-gray-600 mb-2" {...props} />
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          )}
           
           {/* Chart Display */}
           {message.hasChart && message.chartFile && !isUser && (
