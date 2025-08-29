@@ -41,9 +41,8 @@ from schema_dependencies import (
 from auth_endpoints import include_auth_routes
 from multi_sheet_uploader import MultiSheetExcelUploader
 from celery_tasks import create_file_processing_task, get_task_status
-from enhanced_sql_agent import create_enhanced_user_agent, EnhancedMultiDatabaseSQLAgent
+from services.agent_orchestrator import get_orchestrator
 from database_discovery import discovery_service
-from api.multi_agent_api import router as multi_agent_router
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -152,15 +151,10 @@ from multi_sheet_uploader import MultiSheetExcelUploader
 
 uploader = MultiSheetExcelUploader()
 
-# Store Enhanced SQL agents per user
-enhanced_sql_agents = {}
-
-# Function to invalidate a user's SQL agent
+# Function to invalidate a user's agent cache (no longer needed with orchestrator)
 def invalidate_user_agent(user_id: str):
-    """Invalidate a user's SQL agent so it will be recreated with new tables."""
-    if user_id in enhanced_sql_agents:
-        del enhanced_sql_agents[user_id]
-        print(f"✅ Invalidated enhanced SQL agent for user: {user_id}")
+    """Legacy function - agent invalidation handled by orchestrator."""
+    logger.info(f"ℹ️ Agent invalidation requested for user: {user_id} (handled by orchestrator)")
 
 # In-memory store for session histories.
 session_histories = {}
@@ -288,21 +282,34 @@ def health_check():
             available_databases = []
             db_count = 0
         
+        # Get orchestrator health stats
+        orchestrator = get_orchestrator(static_dir="static/charts")
+        orchestrator_health = orchestrator.health_check()
+        orchestrator_stats = orchestrator.get_stats()
+        
         return {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
-            "service": "enhanced-multi-database-sql-agent",
-            "version": "3.0.0",
+            "service": "three-agent-pipeline-system",
+            "version": "4.0.0",
             "database": "connected",
-            "active_enhanced_agents": len(enhanced_sql_agents),
+            "orchestrator_status": orchestrator_health.get('orchestrator', 'unknown'),
+            "agent_pipeline": {
+                "enhanced_sql_agent": "✅ Active",
+                "mutual_fund_quant_agent": "✅ Active", 
+                "data_formatter_agent": "✅ Active"
+            },
+            "execution_stats": orchestrator_stats.get('execution_stats', {}),
             "available_databases": db_count,
             "database_names": available_databases,
             "features": [
+                "three_agent_pipeline",
                 "dynamic_database_discovery",
                 "multi_database_access", 
                 "schema_per_tenant",
-                "intelligent_prompts",
-                "session_history"
+                "quantitative_analysis",
+                "plotly_visualizations",
+                "intelligent_orchestration"
             ]
         }
     except Exception as e:
@@ -318,7 +325,7 @@ async def query_database(
     current_user: User = Depends(get_current_user),
     db_session = Depends(get_db_session_with_schema)
 ):
-    """Process natural language query for authenticated user using enhanced multi-database architecture."""
+    """Process natural language query using the new three-agent pipeline architecture."""
     try:
         # Ensure user schema exists
         ensure_user_schema(current_user.email)
@@ -326,44 +333,59 @@ async def query_database(
         # Get user session from schema user service
         session = schema_user_service.create_session_from_email(current_user.email, current_user.name)
         
-        # Get or create Enhanced SQL agent for this user
+        # Get orchestrator instance
+        orchestrator = get_orchestrator(static_dir="static/charts")
+        
+        # Generate session ID for this query
+        session_id = f"{current_user.email}_{session.email}"
+        
+        # Determine discovery mode based on query content
+        query_lower = request.query.lower()
+        comprehensive_keywords = [
+            'list all databases', 'show all databases', 'all databases',
+            'list databases', 'show databases', 'what databases',
+            'available databases', 'all available databases',
+            'comprehensive', 'system wide', 'cross database'
+        ]
+        
+        # Use comprehensive mode if query requests system-wide information
+        discovery_mode = "multidatabase" if any(keyword in query_lower for keyword in comprehensive_keywords) else "multitenant"
+        
+        logger.info(f"🔍 Using discovery mode: {discovery_mode} for query: '{request.query[:50]}...'")
+        
+        # Process query through the three-agent pipeline:
+        # Enhanced SQL Agent → Mutual Fund Quant Agent → Data Formatter Agent
+        result = await orchestrator.process_query(
+            query=request.query,
+            user_email=current_user.email,
+            session_id=session_id,
+            discovery_mode=discovery_mode
+        )
+        
+        # Get schema name for response
         from schema_migration import email_to_schema_name
         schema_name = email_to_schema_name(current_user.email)
         
-        if current_user.email not in enhanced_sql_agents:
-            # Create enhanced agent with dynamic database discovery
-            enhanced_sql_agents[current_user.email] = create_enhanced_user_agent(current_user.email)
-            logger.info(f"✅ Created enhanced SQL agent for user: {current_user.email}")
-        
-        enhanced_agent = enhanced_sql_agents[current_user.email]
-        
-        # Process the query using the enhanced agent
-        result = enhanced_agent.process_query(
-            query=request.query,
-            session_id=current_user.email
-        )
-        
-        if result['success']:
-            # Chart generation is now handled directly by Enhanced SQL Agent
-            # Extract chart info from agent result if available
-            chart_file = result.get('chart_file')
-            chart_type = result.get('chart_type')
+        if result.get('success', False):
+            logger.info(f"✅ Query processed successfully through orchestrator for {current_user.email}")
             
             return QueryResponse(
                 success=True,
                 user_id=current_user.email,
-                schema=result.get('schema') or schema_name or 'unknown',
-                response=result['response'],
+                schema=schema_name,
+                response=result.get('response', 'Query processed successfully'),
                 error=None,
-                chart_file=chart_file if 'chart_file' in locals() else None,
-                chart_type=chart_type if 'chart_type' in locals() else None
+                chart_file=result.get('chart_file'),
+                chart_type=result.get('chart_type')
             )
         else:
+            logger.warning(f"⚠️ Query processing failed for {current_user.email}: {result.get('error')}")
+            
             return QueryResponse(
                 success=False,
                 user_id=current_user.email,
-                schema=result.get('schema') or schema_name or 'unknown',
-                response=result['response'],
+                schema=schema_name,
+                response=result.get('response', 'An error occurred processing your query'),
                 error=result.get('error')
             )
         
@@ -478,8 +500,8 @@ async def upload_files_sync(
             session.add_message('system', message)
             
             # Invalidate user's SQL agent to pick up new tables
-            if session.user_id in sql_agents:
-                del sql_agents[session.user_id]
+            if session.email in sql_agents:
+                del sql_agents[session.email]
             
             return UploadResponse(**result)
             
@@ -642,22 +664,29 @@ async def get_database_discovery(
 async def get_discovery_summary(
     current_user: User = Depends(get_current_user)
 ):
-    """Get a summary of the user's database discovery and agent status."""
+    """Get a summary of the user's database discovery and orchestrator status."""
     try:
-        # Check if user has an active enhanced agent
-        has_agent = current_user.email in enhanced_sql_agents
-        agent_summary = {}
+        # Get orchestrator status
+        orchestrator = get_orchestrator(static_dir="static/charts")
+        orchestrator_health = orchestrator.health_check()
+        orchestrator_stats = orchestrator.get_stats()
         
-        if has_agent:
-            agent = enhanced_sql_agents[current_user.email]
-            agent_summary = agent.get_database_summary()
+        # Get basic database discovery info
+        try:
+            available_databases = discovery_service.list_available_databases()
+            db_count = len(available_databases)
+        except Exception:
+            available_databases = []
+            db_count = 0
         
         return {
             "success": True,
             "user_email": current_user.email,
-            "has_active_agent": has_agent,
-            "agent_summary": agent_summary,
-            "available_contexts": agent.list_available_contexts() if has_agent else [],
+            "orchestrator_status": orchestrator_health.get('orchestrator', 'unknown'),
+            "agent_pipeline_status": orchestrator_stats.get('agents_status', {}),
+            "execution_stats": orchestrator_stats.get('execution_stats', {}),
+            "available_databases": db_count,
+            "database_names": available_databases,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -668,25 +697,29 @@ async def get_discovery_summary(
 async def refresh_user_agent(
     current_user: User = Depends(get_current_user)
 ):
-    """Refresh the user's enhanced agent with updated database discovery."""
+    """Refresh orchestrator agents and database discovery (agents are created fresh on each request)."""
     try:
-        # Remove existing agent to force recreation with fresh discovery
-        if current_user.email in enhanced_sql_agents:
-            del enhanced_sql_agents[current_user.email]
-            logger.info(f"Removed existing agent for {current_user.email}")
+        # Get fresh orchestrator status and health
+        orchestrator = get_orchestrator(static_dir="static/charts")
+        orchestrator_health = orchestrator.health_check()
+        orchestrator_stats = orchestrator.get_stats()
         
-        # Create new enhanced agent with fresh discovery
-        enhanced_sql_agents[current_user.email] = create_enhanced_user_agent(current_user.email)
-        
-        # Get updated summary
-        agent = enhanced_sql_agents[current_user.email]
-        summary = agent.get_database_summary()
+        # Get updated database discovery
+        try:
+            available_databases = discovery_service.list_available_databases()
+            db_count = len(available_databases)
+        except Exception:
+            available_databases = []
+            db_count = 0
         
         return {
             "success": True,
-            "message": "Agent refreshed successfully",
+            "message": "Orchestrator and database discovery refreshed successfully",
             "user_email": current_user.email,
-            "agent_summary": summary,
+            "orchestrator_status": orchestrator_health.get('orchestrator', 'unknown'),
+            "agent_pipeline_status": orchestrator_stats.get('agents_status', {}),
+            "available_databases": db_count,
+            "database_names": available_databases,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -699,18 +732,33 @@ async def get_available_contexts(
 ):
     """Get all available database/schema contexts for the user."""
     try:
-        # Ensure user has an enhanced agent
-        if current_user.email not in enhanced_sql_agents:
-            enhanced_sql_agents[current_user.email] = create_enhanced_user_agent(current_user.email)
-        
-        agent = enhanced_sql_agents[current_user.email]
-        contexts = agent.list_available_contexts()
+        # Get database discovery info directly
+        try:
+            available_databases = discovery_service.list_available_databases()
+            db_contexts = []
+            
+            for db_name in available_databases:
+                try:
+                    schemas = discovery_service.get_database_schemas(db_name)
+                    for schema in schemas:
+                        db_contexts.append({
+                            'database': db_name,
+                            'schema': schema,
+                            'context_id': f"{db_name}.{schema}"
+                        })
+                except Exception as e:
+                    logger.warning(f"Failed to get schemas for {db_name}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Database discovery failed: {e}")
+            db_contexts = []
         
         return {
             "success": True,
             "user_email": current_user.email,
-            "available_contexts": contexts,
-            "total_contexts": len(contexts),
+            "available_contexts": db_contexts,
+            "total_contexts": len(db_contexts),
+            "available_databases": len(available_databases) if 'available_databases' in locals() else 0,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -920,8 +968,7 @@ async def serve_chart_embed(chart_file: str):
         raise HTTPException(status_code=500, detail="Error serving chart")
 
 
-# Include multi-agent system routes
-app.include_router(multi_agent_router)
+# All routes are now handled by the three-agent orchestrator pipeline above
 
 include_auth_routes(app)
 

@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     
     # --- LLM Configuration ---
     openai_api_key: str = Field(..., description="OpenAI API key for LLM access")
+    openai_model: str = Field(default="gpt-4o", description="OpenAI model to use")
+    openai_temperature: float = Field(default=0.0, description="OpenAI temperature setting")
+    openai_max_tokens: int = Field(default=4000, description="Maximum tokens for OpenAI responses")
     
     # --- LangSmith Configuration ---
     langchain_tracing_v2: bool = Field(default=False, description="Enable LangSmith tracing")

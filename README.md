@@ -625,14 +625,7 @@ sql_agent_project_v4_multitenant/
 │   ├── data_formatter.py      # 📈 Data visualization agent
 │   └── multi_agent_orchestrator.py # 🎭 Main orchestrator
 │
-├── api/                        # 🌐 API Layer
-│   ├── __init__.py            # 📦 API exports
-│   └── multi_agent_api.py     # 🚀 Multi-agent FastAPI endpoints
-│
-├── config/                     # ⚙️ Configuration Management
-│   ├── __init__.py            # 📦 Config exports
-│   └── multi_agent_config.py  # 📝 Multi-agent configuration
-│
+
 ├── services/                   # 🔧 Service Layer
 │   ├── __init__.py            # 📦 Service exports
 │   └── multi_agent_service.py # 🏢 Business logic layer
@@ -1306,10 +1299,10 @@ if "your_specialty_keyword" in query.lower():
 
 **3. Add Agent Configuration:**
 ```python
-# config/multi_agent_config.py
+# settings.py - Add any new configuration variables
 YOUR_CUSTOM_AGENT_ENABLED = get_bool_env("YOUR_CUSTOM_AGENT_ENABLED", True)
 
-# agents/agent_configs.py
+# agent_prompts.py - Add custom prompts
 YOUR_CUSTOM_AGENT_PROMPT = """
 You are a specialist in [your domain]. 
 Provide expert analysis and recommendations.

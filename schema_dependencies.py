@@ -40,6 +40,7 @@ def get_db_session_with_schema(
     It sets the PostgreSQL search_path to the user's schema, allowing queries to work transparently
     with the user's data in their dedicated schema.
     """
+    session = None
     try:
         
         # Get or create tenant and schema
@@ -67,7 +68,8 @@ def get_db_session_with_schema(
             detail=f"Database session error: {str(e)}"
         )
     finally:
-        session.close()
+        if session:
+            session.close()
 
 def get_user_schema_name(
     current_user: User = Depends(get_current_user),

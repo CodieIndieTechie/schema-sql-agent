@@ -1,45 +1,39 @@
 """
-Multi-Agent System for Financial Data Analysis
+Three-Agent Pipeline System for Financial Data Analysis
 
-This package contains a sophisticated multi-agent system built on top of the existing
-SQL agent infrastructure. The system coordinates multiple specialized agents to provide
-comprehensive financial analysis and insights.
+This package contains a streamlined three-agent pipeline system that coordinates
+specialized agents for comprehensive financial analysis and insights.
 
-Agents:
-- OrchestratorAgent: Main coordinator and query router
-- SQLAgentWrapper: Database query execution and schema management
-- MutualFundExpertAgent: Financial analysis and investment insights
-- WebAgent: Market research and current information gathering
-- DataFormatterAgent: Response formatting and visualization
+Core Three-Agent Pipeline:
+- EnhancedMultiDatabaseSQLAgent: Database discovery, connection management, SQL execution
+- MutualFundQuantAgent: Pandas operations, complex calculations, financial metrics  
+- DataFormatterAgent: Plotly visualization, data formatting, output generation
+
+Orchestration:
+- AgentOrchestrator: Manages sequential flow through the three-agent pipeline
 
 Usage:
-    from agents.multi_agent_orchestrator import MultiAgentOrchestrator
+    from services.agent_orchestrator import get_orchestrator
     
-    orchestrator = MultiAgentOrchestrator()
+    orchestrator = get_orchestrator(static_dir="static/charts")
     result = await orchestrator.process_query(
-        user_query="Show me top performing mutual funds",
-        user_email="user@example.com"
+        user_email="user@example.com",
+        session_id="session123",
+        query="Show me top performing mutual funds",
+        discovery_mode="multitenant"
     )
 """
 
-from .multi_agent_orchestrator import MultiAgentOrchestrator
-from .orchestrator_agent import OrchestratorAgent
-from .sql_agent_wrapper import SQLAgentWrapper
-from .mutual_fund_expert import MutualFundExpertAgent
-from .web_agent import WebAgent  
-from .data_formatter import DataFormatterAgent
-from .base_agent import BaseAgent, AgentState, AgentMessage
+# Core three-agent pipeline
+from .enhanced_sql_agent import EnhancedSQLAgent, create_enhanced_sql_agent
+from .mutual_fund_quant_agent import MutualFundQuantAgent
+from .data_formatter_agent import DataFormatterAgent
 
 __all__ = [
-    'MultiAgentOrchestrator',
-    'OrchestratorAgent',
-    'SQLAgentWrapper', 
-    'MutualFundExpertAgent',
-    'WebAgent',
-    'DataFormatterAgent',
-    'BaseAgent',
-    'AgentState',
-    'AgentMessage'
+    'EnhancedSQLAgent',
+    'create_enhanced_sql_agent', 
+    'MutualFundQuantAgent',
+    'DataFormatterAgent'
 ]
 
 __version__ = "1.0.0"

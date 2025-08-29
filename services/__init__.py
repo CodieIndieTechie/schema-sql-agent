@@ -1,19 +1,12 @@
 """
-Services module for multi-agent system
+Services module for three-agent pipeline system
 
-Provides high-level business logic and service layer abstractions.
+Provides the agent orchestrator service for coordinating the three-agent pipeline.
 """
 
-from .multi_agent_service import (
-    MultiAgentService,
-    QuerySession,
-    QueryResult,
-    get_multi_agent_service
-)
+from .agent_orchestrator import AgentOrchestrator, get_orchestrator
 
 __all__ = [
-    "MultiAgentService",
-    "QuerySession", 
-    "QueryResult",
-    "get_multi_agent_service"
+    "AgentOrchestrator",
+    "get_orchestrator"
 ]
