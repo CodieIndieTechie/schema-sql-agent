@@ -165,11 +165,17 @@ class AgentOrchestrator:
             # Create SQL agent based on discovery mode
             if discovery_mode == "multitenant":
                 sql_agent = create_enhanced_sql_agent(user_email)
+                # Clear agent cache to ensure new iteration limits are used
+                sql_agent.clear_agent_cache()
             elif discovery_mode == "multidatabase":
                 sql_agent = create_system_sql_agent()
+                # Clear agent cache to ensure new iteration limits are used
+                sql_agent.clear_agent_cache()
             else:
                 logger.warning(f"Unknown discovery mode: {discovery_mode}, defaulting to multitenant")
                 sql_agent = create_enhanced_sql_agent(user_email)
+                # Clear agent cache to ensure new iteration limits are used
+                sql_agent.clear_agent_cache()
             
             if not sql_agent:
                 return {

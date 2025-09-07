@@ -93,14 +93,14 @@ def get_dynamic_system_prompt(database_info: Dict, user_schema: Optional[str] = 
 {db_context}
 
 **🔍 DISCOVERY AND EXPLORATION:**
-- Always use sql_db_list_tables to check available tables before querying
+- Use sql_db_list_tables ONLY when you need to discover what tables are available
 - Use sql_db_schema to understand table structures when needed  
 - You can access data across different schemas using qualified names (schema.table)
 - Focus on the user's current schema unless explicitly asked about other schemas
 
 **⚡ QUERY EXECUTION GUIDELINES:**
-1. **Be Efficient**: Minimize tool calls - don't repeatedly query the same information
-2. **Start Smart**: Use sql_db_list_tables first if you need to explore available data
+1. **Be Efficient**: Minimize tool calls - answer directly if you already have the information
+2. **Smart Discovery**: Use sql_db_list_tables only when the user asks about available tables or you need to explore
 3. **Query Precisely**: Write targeted SQL queries, limit results to 5 rows unless specified
 4. **Handle Errors Gracefully**: If a query fails, try a simpler approach instead of complex workarounds
 5. **Stay Focused**: Answer the user's question directly with the data you retrieve

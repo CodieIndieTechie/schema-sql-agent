@@ -173,8 +173,8 @@ class EnhancedSQLAgent:
                 tools=tools,
                 verbose=settings.debug,
                 handle_parsing_errors=True,
-                max_iterations=25,
-                max_execution_time=90,
+                max_iterations=75,
+                max_execution_time=180,
                 return_intermediate_steps=True,
             )
             

@@ -186,8 +186,9 @@ def clear_session_history(session_id: str) -> bool:
 def create_multitenant_sql_agent(database_uri: str, schema_name: str = None) -> AgentExecutor:
     """Create a SQL agent for schema-per-tenant architecture."""
     try:
-        # Create database connection with schema-specific search path
-        db = SQLDatabase.from_uri(database_uri)
+        # Use mutual_fund_db database which contains the bse_details table
+        mutual_fund_db_uri = settings.get_database_uri("mutual_fund_db")
+        db = SQLDatabase.from_uri(mutual_fund_db_uri)
         
         # Initialize OpenAI LLM
         llm = ChatOpenAI(
@@ -202,10 +203,41 @@ def create_multitenant_sql_agent(database_uri: str, schema_name: str = None) -> 
         toolkit = SQLDatabaseToolkit(db=db, llm=llm)
         tools = toolkit.get_tools()
         
-        # System prompt for schema-per-tenant architecture
-        system_prompt = f"""You are a helpful SQL expert assistant with access to a PostgreSQL database.
+        # System prompt for mutual fund database access
+        system_prompt = """You are a helpful SQL expert assistant with access to the mutual_fund_db PostgreSQL database.
 
-You are working with the user's personal schema{f' ({schema_name})' if schema_name else ''} which contains their uploaded data files and tables.
+You have access to a comprehensive mutual fund database containing:
+
+**Available Tables:**
+- `schemes`: Main table with 1,488 mutual fund schemes (scheme_code, scheme_name, amfi_broad, amfi_sub, amc_code, current_nav, aum_in_lakhs, risk_level, sip_allowed, purchase_allowed)
+- `bse_details`: BSE trading information for 2,891 records (scheme_id, bse_code, sip_flag, stp_flag, swp_flag, purchase_allowed, sip_min_amount, sip_max_amount)
+- `returns_history`: Time-series returns data for 9,827 records (scheme_id, period, return_value, data_date)
+- `historical_nav_data`: Historical NAV data in JSONB format (scheme_id, nav_history, data_start_date, data_end_date)
+- `complete_nav_history`: Complete NAV history records
+
+**IMPORTANT - AUM Data Formatting:**
+- The `aum_in_lakhs` column stores values in Indian Lakhs (1 Lakh = 100,000 rupees)
+- When displaying AUM values, ALWAYS multiply by 100,000 (10^5) to convert from lakhs to rupees
+- Example: If aum_in_lakhs = 196049.8, display as ₹19,60,49,80,000 (196049.8 × 100,000)
+- Use proper Indian number formatting with commas for readability
+
+**IMPORTANT - Returns Data Parsing:**
+- The `returns_data` column contains JSONB data with time period keys and return values
+- JSON format example: {{"1d": -0.05, "1m": 0.03, "1y": 9.23, "3y": 12.45, "5y": 15.67}}
+- Time period keys: "1d" (1 day), "1m" (1 month), "6m" (6 months), "1y" (1 year), "3y" (3 years), "5y" (5 years), "10y" (10 years)
+- Use PostgreSQL JSONB operators to extract specific returns: returns_data->>'1y' for 1-year returns
+- Example SQL: SELECT scheme_name, returns_data->>'1y' as return_1y FROM schemes WHERE returns_data IS NOT NULL
+- Always convert extracted values to numeric and format as percentages for display
+
+**Key Relationships:**
+- schemes.id ↔ bse_details.scheme_id
+- schemes.id ↔ returns_history.scheme_id
+- schemes.id ↔ historical_nav_data.scheme_id
+
+**Available Views:**
+- `scheme_summary`: Comprehensive scheme overview with aggregated metrics
+- `top_performers`: Best performing schemes ranked by returns
+- `category_performance`: Category-wise performance analysis
 
 **IMPORTANT - Query Guidelines:**
 1. Be efficient: Use the minimum number of tool calls needed to answer the question
@@ -215,8 +247,22 @@ You are working with the user's personal schema{f' ({schema_name})' if schema_na
 5. Don't repeatedly query the same information
 6. If you get an error, try a simpler approach instead of complex workarounds
 
+**AUM Display Rules:**
+- When showing AUM values, ALWAYS convert from lakhs to rupees by multiplying by 100,000
+- Format numbers with Indian comma notation (e.g., ₹19,60,49,80,000)
+- Never show raw lakh values to users - always convert to full rupee amounts
+
+**Returns Data Query Rules:**
+- When users ask for returns for specific time periods, use JSONB operators to extract the correct values
+- Map user queries to JSON keys: "1 year" → "1y", "3 years" → "3y", "1 month" → "1m", etc.
+- Use SQL like: SELECT scheme_name, (returns_data->>'1y')::numeric as return_1y FROM schemes
+- Format return values as percentages (multiply by 100 if needed and add % symbol)
+- Handle NULL values gracefully - show "N/A" if returns data is missing
+
 **Response Format:**
 - Execute necessary tools to get the data
+- Apply AUM conversion and returns parsing before displaying results
+- Use proper JSONB extraction for returns data based on user's time period request
 - Provide a clear, concise answer based on the results
 - Stop after providing the answer - don't ask follow-up questions
 
@@ -239,9 +285,8 @@ Remember: Be direct and efficient. Answer the user's question with the data you 
             tools=tools,
             verbose=False,  # Set to True for debugging
             handle_parsing_errors=True,
-            max_iterations=15,  # Increased from 10 to 15
-            max_execution_time=60,  # 60 second timeout
-            early_stopping_method="generate",  # Changed from "force" to "generate"
+            max_iterations=75,  # Further increased for complex multi-database queries
+            max_execution_time=180,  # 3 minute timeout
             return_intermediate_steps=True,  # Enable for better debugging and evaluation
         )
         
@@ -319,6 +364,43 @@ def health_check():
 # Legacy session endpoints removed - using schema-per-tenant architecture
 
 
+@app.post("/query-test", response_model=QueryResponse)
+async def query_database_test(request: QueryRequest):
+    """Test endpoint without authentication to verify agent functionality."""
+    try:
+        # Use anonymous user for testing
+        from schema_user_service import SchemaUserSession
+        test_user_email = "test@example.com"
+        
+        # Ensure test schema exists
+        ensure_user_schema(test_user_email)
+        
+        # Create database URI for portfoliosql
+        from settings import get_portfoliosql_connection
+        engine = get_portfoliosql_connection()
+        db_uri = str(engine.url)
+        
+        # Create SQL agent
+        agent_with_history = create_multitenant_sql_agent(db_uri, schema_name="test_schema")
+        
+        # Execute query
+        result = agent_with_history.invoke({
+            "input": request.query
+        }, config={"configurable": {"session_id": "test_session"}})
+        
+        return QueryResponse(
+            response=result.get("output", "No response generated"),
+            user_id="test@example.com",
+            schema="test_schema", 
+            success=True,
+            session_id="test_session",
+            metadata={"test_mode": True}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in test query: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Query processing failed: {str(e)}")
+
 @app.post("/query", response_model=QueryResponse)
 async def query_database(
     request: QueryRequest,
@@ -349,48 +431,72 @@ async def query_database(
         ]
         
         # Use comprehensive mode if query requests system-wide information
-        discovery_mode = "multidatabase" if any(keyword in query_lower for keyword in comprehensive_keywords) else "multitenant"
+        discovery_mode = "comprehensive" if any(keyword in query_lower for keyword in comprehensive_keywords) else "multitenant"
         
-        logger.info(f"🔍 Using discovery mode: {discovery_mode} for query: '{request.query[:50]}...'")
-        
-        # Process query through the three-agent pipeline:
-        # Enhanced SQL Agent → Mutual Fund Quant Agent → Data Formatter Agent
-        result = await orchestrator.process_query(
+        # Process query through orchestrator
+        result = orchestrator.process_query(
             query=request.query,
             user_email=current_user.email,
             session_id=session_id,
             discovery_mode=discovery_mode
         )
         
-        # Get schema name for response
-        from schema_migration import email_to_schema_name
-        schema_name = email_to_schema_name(current_user.email)
-        
-        if result.get('success', False):
-            logger.info(f"✅ Query processed successfully through orchestrator for {current_user.email}")
-            
-            return QueryResponse(
-                success=True,
-                user_id=current_user.email,
-                schema=schema_name,
-                response=result.get('response', 'Query processed successfully'),
-                error=None,
-                chart_file=result.get('chart_file'),
-                chart_type=result.get('chart_type')
-            )
-        else:
-            logger.warning(f"⚠️ Query processing failed for {current_user.email}: {result.get('error')}")
-            
-            return QueryResponse(
-                success=False,
-                user_id=current_user.email,
-                schema=schema_name,
-                response=result.get('response', 'An error occurred processing your query'),
-                error=result.get('error')
-            )
+        return QueryResponse(
+            response=result.get("response", "No response generated"),
+            user_id=current_user.email,
+            schema=session.schema_name,
+            success=result.get("success", True),
+            error=result.get("error"),
+            chart_file=result.get("chart_file"),
+            chart_type=result.get("chart_type"),
+            session_id=session_id,
+            metadata=result.get("metadata", {})
+        )
         
     except Exception as e:
-        logger.error(f"Enhanced query processing failed for user {current_user.email}: {str(e)}")
+        logger.error(f"Error processing query for user {current_user.email}: {str(e)}")
+        return QueryResponse(
+            response=f"I apologize, but I encountered an error while processing your query: {str(e)}",
+            user_id=current_user.email,
+            schema="unknown",
+            success=False,
+            error=str(e),
+            session_id=request.session_id or "unknown"
+        )
+
+@app.post("/query-no-auth", response_model=QueryResponse)
+async def query_database_no_auth(request: QueryRequest):
+    """Temporary endpoint without authentication for testing - uses anonymous user."""
+    try:
+        # Use anonymous user for testing
+        anonymous_email = "anonymous@example.com"
+        
+        # Ensure anonymous schema exists
+        ensure_user_schema(anonymous_email)
+        
+        # Create database URI for portfoliosql
+        from settings import get_portfoliosql_connection
+        engine = get_portfoliosql_connection()
+        db_uri = str(engine.url)
+        
+        # Create SQL agent with comprehensive discovery for testing
+        agent_with_history = create_multitenant_sql_agent(db_uri, schema_name="anonymous_schema")
+        
+        # Execute query
+        result = agent_with_history.invoke({
+            "input": request.query
+        }, config={"configurable": {"session_id": "anonymous_session"}})
+        
+        return QueryResponse(
+            response=result.get("output", "No response generated"),
+            user_id=anonymous_email,
+            schema="anonymous_schema", 
+            success=True,
+            session_id="anonymous_session"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in no-auth query: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Query processing failed: {str(e)}")
 
 

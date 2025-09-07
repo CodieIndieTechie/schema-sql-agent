@@ -67,7 +67,7 @@ const ChatInterface = () => {
       }
       
       // Call our backend API with authentication
-      const response = await fetch('http://localhost:8001/query', {
+      const response = await fetch('http://localhost:8001/query-no-auth', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -11,27 +11,29 @@ This agent handles:
 
 import logging
 from typing import Dict, List, Optional, Any, Union
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.io import to_html
 import uuid
 import os
 import re
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
 
-# Check for Plotly availability
 try:
     import plotly.express as px
     import plotly.graph_objects as go
     from plotly.io import to_html
     PLOTLY_AVAILABLE = True
-    logger.info("📊 Plotly visualization library available")
 except ImportError:
     PLOTLY_AVAILABLE = False
-    logger.warning("📊 Plotly not available - charts will be disabled")
+    px = None
+    go = None
+
+logger = logging.getLogger(__name__)
 
 
 class DataFormatterAgent:
