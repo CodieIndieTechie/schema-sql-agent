@@ -52,15 +52,15 @@ class Settings(BaseSettings):
     # --- API Server Configuration ---
     api_host: str = Field(default="localhost", description="API server host")
     api_port: int = Field(default=8001, description="API server port")
-    cors_origins: list[str] = Field(
-        default=[
-            "http://localhost:3001", 
-            "http://127.0.0.1:3001", 
-            "http://localhost:3000", 
-            "http://127.0.0.1:3000"
-        ], 
-        description="CORS allowed origins"
+    cors_origins: str = Field(
+        default="http://localhost:3001,http://127.0.0.1:3001,http://localhost:3000,http://127.0.0.1:3000",
+        description="CORS allowed origins (comma-separated)"
     )
+    
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Parse CORS origins string into list"""
+        return [origin.strip() for origin in self.cors_origins.split(',')]
     
     # --- Google OAuth Configuration ---
     google_client_id: str = Field(..., description="Google OAuth client ID")

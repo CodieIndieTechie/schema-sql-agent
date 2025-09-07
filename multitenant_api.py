@@ -33,6 +33,10 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
 
 from settings import settings
+import os
+
+# Force set OpenAI API key in environment to override any cached values
+os.environ['OPENAI_API_KEY'] = settings.openai_api_key
 from schema_user_service import schema_user_service
 from auth_service import get_current_user, User
 from schema_dependencies import (
@@ -41,7 +45,7 @@ from schema_dependencies import (
 from auth_endpoints import include_auth_routes
 from multi_sheet_uploader import MultiSheetExcelUploader
 from celery_tasks import create_file_processing_task, get_task_status
-from services.agent_orchestrator import get_orchestrator
+from services.mcp_orchestrator import get_mcp_orchestrator
 from database_discovery import discovery_service
 
 # Setup logging
@@ -126,7 +130,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -311,7 +315,7 @@ async def root():
 
 
 @app.get("/health")
-def health_check():
+async def health_check():
     """Health check endpoint with enhanced agent statistics."""
     try:
         # Test database connection
@@ -327,9 +331,9 @@ def health_check():
             available_databases = []
             db_count = 0
         
-        # Get orchestrator health stats
-        orchestrator = get_orchestrator(static_dir="static/charts")
-        orchestrator_health = orchestrator.health_check()
+        # Get MCP orchestrator health stats
+        orchestrator = get_mcp_orchestrator(static_dir="static/charts")
+        orchestrator_health = await orchestrator.get_health_status()
         orchestrator_stats = orchestrator.get_stats()
         
         return {
@@ -415,40 +419,31 @@ async def query_database(
         # Get user session from schema user service
         session = schema_user_service.create_session_from_email(current_user.email, current_user.name)
         
-        # Get orchestrator instance
-        orchestrator = get_orchestrator(static_dir="static/charts")
+        # Get MCP orchestrator instance
+        orchestrator = get_mcp_orchestrator(static_dir="static/charts")
         
         # Generate session ID for this query
         session_id = f"{current_user.email}_{session.email}"
         
-        # Determine discovery mode based on query content
-        query_lower = request.query.lower()
-        comprehensive_keywords = [
-            'list all databases', 'show all databases', 'all databases',
-            'list databases', 'show databases', 'what databases',
-            'available databases', 'all available databases',
-            'comprehensive', 'system wide', 'cross database'
-        ]
-        
-        # Use comprehensive mode if query requests system-wide information
-        discovery_mode = "comprehensive" if any(keyword in query_lower for keyword in comprehensive_keywords) else "multitenant"
-        
-        # Process query through orchestrator
-        result = orchestrator.process_query(
+        # Process query through MCP orchestrator
+        result = await orchestrator.process_query(
             query=request.query,
             user_email=current_user.email,
-            session_id=session_id,
-            discovery_mode=discovery_mode
+            session_id=session_id
         )
+        
+        # Extract chart files from MCP result
+        chart_files = result.get("chart_files", [])
+        chart_file = chart_files[0] if chart_files else None
         
         return QueryResponse(
             response=result.get("response", "No response generated"),
             user_id=current_user.email,
             schema=session.schema_name,
-            success=result.get("success", True),
-            error=result.get("error"),
-            chart_file=result.get("chart_file"),
-            chart_type=result.get("chart_type"),
+            success=True,  # MCP orchestrator handles errors internally
+            error=result.get("metadata", {}).get("error"),
+            chart_file=chart_file,
+            chart_type="plotly" if chart_file else None,
             session_id=session_id,
             metadata=result.get("metadata", {})
         )
@@ -466,7 +461,7 @@ async def query_database(
 
 @app.post("/query-no-auth", response_model=QueryResponse)
 async def query_database_no_auth(request: QueryRequest):
-    """Temporary endpoint without authentication for testing - uses anonymous user."""
+    """Temporary endpoint without authentication for testing - uses MCP orchestrator."""
     try:
         # Use anonymous user for testing
         anonymous_email = "anonymous@example.com"
@@ -474,30 +469,50 @@ async def query_database_no_auth(request: QueryRequest):
         # Ensure anonymous schema exists
         ensure_user_schema(anonymous_email)
         
-        # Create database URI for portfoliosql
-        from settings import get_portfoliosql_connection
-        engine = get_portfoliosql_connection()
-        db_uri = str(engine.url)
-        
-        # Create SQL agent with comprehensive discovery for testing
-        agent_with_history = create_multitenant_sql_agent(db_uri, schema_name="anonymous_schema")
-        
-        # Execute query
-        result = agent_with_history.invoke({
-            "input": request.query
-        }, config={"configurable": {"session_id": "anonymous_session"}})
-        
-        return QueryResponse(
-            response=result.get("output", "No response generated"),
-            user_id=anonymous_email,
-            schema="anonymous_schema", 
-            success=True,
-            session_id="anonymous_session"
-        )
+        # Use direct SQL agent for query processing
+        try:
+            # Create database URI for portfoliosql
+            from settings import get_portfoliosql_connection
+            engine = get_portfoliosql_connection()
+            db_uri = str(engine.url)
+            
+            # Create SQL agent with comprehensive discovery for testing
+            agent_with_history = create_multitenant_sql_agent(db_uri, schema_name="anonymous_schema")
+            
+            # Execute query
+            result = agent_with_history.invoke({
+                "input": request.query
+            }, config={"configurable": {"session_id": "anonymous_session"}})
+            
+            return QueryResponse(
+                response=result.get("output", "No response generated"),
+                user_id=anonymous_email,
+                schema="anonymous_schema", 
+                success=True,
+                session_id="anonymous_session"
+            )
+            
+        except Exception as agent_error:
+            logger.error(f"SQL agent error: {str(agent_error)}")
+            return QueryResponse(
+                response=f"I apologize, but I encountered an error while processing your query: {str(agent_error)}",
+                user_id=anonymous_email,
+                schema="anonymous_schema",
+                success=False,
+                error=str(agent_error),
+                session_id="anonymous_session"
+            )
         
     except Exception as e:
         logger.error(f"Error in no-auth query: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Query processing failed: {str(e)}")
+        return QueryResponse(
+            response=f"I apologize, but I encountered an error while processing your query: {str(e)}",
+            user_id="anonymous@example.com",
+            schema="anonymous_schema",
+            success=False,
+            error=str(e),
+            session_id="anonymous_session"
+        )
 
 
 @app.post("/upload-files")
@@ -772,9 +787,9 @@ async def get_discovery_summary(
 ):
     """Get a summary of the user's database discovery and orchestrator status."""
     try:
-        # Get orchestrator status
-        orchestrator = get_orchestrator(static_dir="static/charts")
-        orchestrator_health = orchestrator.health_check()
+        # Get MCP orchestrator status
+        orchestrator = get_mcp_orchestrator(static_dir="static/charts")
+        orchestrator_health = await orchestrator.get_health_status()
         orchestrator_stats = orchestrator.get_stats()
         
         # Get basic database discovery info
@@ -805,10 +820,13 @@ async def refresh_user_agent(
 ):
     """Refresh orchestrator agents and database discovery (agents are created fresh on each request)."""
     try:
-        # Get fresh orchestrator status and health
-        orchestrator = get_orchestrator(static_dir="static/charts")
-        orchestrator_health = orchestrator.health_check()
+        # Get fresh MCP orchestrator status and health
+        orchestrator = get_mcp_orchestrator(static_dir="static/charts")
+        orchestrator_health = await orchestrator.get_health_status()
         orchestrator_stats = orchestrator.get_stats()
+        
+        # Refresh MCP connections
+        refresh_result = await orchestrator.refresh_connections()
         
         # Get updated database discovery
         try:
