@@ -43,8 +43,8 @@ passlib[bcrypt]
 authlib
 httpx
 
-# MCP (Model Context Protocol)
-mcp>=1.0.0
-anthropic-mcp-client>=0.1.0
+# MCP (Model Context Protocol) - Optional
+# mcp>=1.0.0
+# anthropic-mcp-client>=0.1.0
 websockets>=12.0
-asyncio-mqtt>=0.16.0
+# asyncio-mqtt>=0.16.0

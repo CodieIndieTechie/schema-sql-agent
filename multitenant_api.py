@@ -190,8 +190,8 @@ def clear_session_history(session_id: str) -> bool:
 def create_multitenant_sql_agent(database_uri: str, schema_name: str = None) -> AgentExecutor:
     """Create a SQL agent for schema-per-tenant architecture."""
     try:
-        # Use mutual_fund_db database which contains the bse_details table
-        mutual_fund_db_uri = settings.get_database_uri("mutual_fund_db")
+        # Use mutual_fund database which contains the NAV data
+        mutual_fund_db_uri = settings.get_database_uri("mutual_fund")
         db = SQLDatabase.from_uri(mutual_fund_db_uri)
         
         # Initialize OpenAI LLM
@@ -208,69 +208,129 @@ def create_multitenant_sql_agent(database_uri: str, schema_name: str = None) -> 
         tools = toolkit.get_tools()
         
         # System prompt for mutual fund database access
-        system_prompt = """You are a helpful SQL expert assistant with access to the mutual_fund_db PostgreSQL database.
+        system_prompt = """You are a helpful SQL expert assistant with access to the mutual_fund PostgreSQL database.
 
-You have access to a comprehensive mutual fund database containing:
+You have access to a comprehensive mutual fund database containing 7 interconnected tables with 14,562+ records across 1,487 mutual fund schemes:
 
-**Available Tables:**
-- `schemes`: Main table with 1,488 mutual fund schemes (scheme_code, scheme_name, amfi_broad, amfi_sub, amc_code, current_nav, aum_in_lakhs, risk_level, sip_allowed, purchase_allowed)
-- `bse_details`: BSE trading information for 2,891 records (scheme_id, bse_code, sip_flag, stp_flag, swp_flag, purchase_allowed, sip_min_amount, sip_max_amount)
-- `returns_history`: Time-series returns data for 9,827 records (scheme_id, period, return_value, data_date)
-- `historical_nav_data`: Historical NAV data in JSONB format (scheme_id, nav_history, data_start_date, data_end_date)
-- `complete_nav_history`: Complete NAV history records
+**Core Tables & Relationships:**
+```
+schemes (1:1) ← scheme_returns
+schemes (1:1) ← sharpe_ratios  
+schemes (1:M) → bse_details
+bse_details (1:M) → sip_configurations
+bse_details (1:M) → transaction_configurations
+schemes (1:M) → historical_nav
+```
+
+**1. SCHEMES Table (1,487 records)**
+Core mutual fund information:
+- `id` (TEXT PK): Unique scheme identifier from MF APIs Club
+- `scheme_code` (TEXT): AMFI scheme code
+- `scheme_name` (TEXT): Full scheme name
+- `amfi_broad` (TEXT): Broad category (Equity, Debt, Hybrid, Other, Solution Oriented)
+- `amfi_sub` (TEXT): Sub-category (Large Cap Fund, Liquid Fund, etc.)
+- `aum_in_lakhs` (DECIMAL): Assets Under Management in lakhs
+- `current_nav` (DECIMAL): Latest Net Asset Value
+- `risk_level` (INTEGER): Risk rating 1-5 (1=lowest, 5=highest)
+- `amc_code` (TEXT): Asset Management Company code
+- `sip_allowed` (BOOLEAN): SIP investment allowed
+- `purchase_allowed` (BOOLEAN): Lump sum purchase allowed
+
+**2. SCHEME_RETURNS Table (1,486 records)**
+Performance returns across time periods:
+- `scheme_id` (TEXT FK): References schemes.id
+- `days1`, `mths1`, `mths6`, `yrs1`, `yrs2`, `yrs3`, `yrs5`, `yrs7`, `yrs10` (DECIMAL): Return percentages
+
+**3. SHARPE_RATIOS Table (267 records)**
+Risk-adjusted performance metrics:
+- `scheme_id` (TEXT FK): References schemes.id
+- `sharpe_3yr`, `sharpe_5yr`, `sharpe_10yr` (DECIMAL): Sharpe ratios
+
+**4. BSE_DETAILS Table (2,889 records)**
+BSE trading information:
+- `id` (SERIAL PK): Auto-increment primary key
+- `scheme_id` (TEXT FK): References schemes.id
+- `bse_code` (TEXT): BSE trading code
+- `sip_flag`, `stp_flag`, `swp_flag`, `switch_flag` (BOOLEAN): Transaction capabilities
+- `lock_in_flag` (BOOLEAN): Lock-in period applicable
+- `lock_in_period_months` (INTEGER): Lock-in duration
+- `exit_load_flag` (BOOLEAN): Exit load applicable
+- `exit_load_message` (TEXT): Exit load conditions
+
+**5. SIP_CONFIGURATIONS Table (3,961 records)**
+SIP parameters and limits:
+- `id` (SERIAL PK): Auto-increment primary key
+- `bse_detail_id` (INTEGER FK): References bse_details.id
+- `sip_type` (TEXT): 'regular' or 'daily' SIP
+- `min_amount`, `max_amount` (DECIMAL): SIP amount limits
+- `min_installments`, `max_installments` (INTEGER): Installment limits
+- `allowed_dates` (JSONB): Array of allowed SIP dates (1-31)
+
+**6. TRANSACTION_CONFIGURATIONS Table (5,778 records)**
+Purchase and redemption rules:
+- `id` (SERIAL PK): Auto-increment primary key
+- `bse_detail_id` (INTEGER FK): References bse_details.id
+- `transaction_type` (TEXT): 'purchase' or 'redemption'
+- `allowed` (BOOLEAN): Transaction type allowed
+- `min_amount`, `max_amount` (DECIMAL): Transaction amount limits
+- `fresh_min` (DECIMAL): Minimum fresh investment
+- `additional_min` (DECIMAL): Minimum additional investment
+
+**7. HISTORICAL_NAV Table (3,037,708 records)**
+Complete historical NAV data (April 1, 2006 to September 10, 2025):
+- `id` (SERIAL PK): Auto-increment primary key
+- `scheme_id` (TEXT FK): References schemes.id
+- `scheme_code` (TEXT): AMFI scheme code
+- `nav_date` (DATE): Date of NAV record
+- `nav_value` (DECIMAL): Net Asset Value on the date
+- Indexes: Optimized for date-range queries and scheme lookups
 
 **IMPORTANT - AUM Data Formatting:**
 - The `aum_in_lakhs` column stores values in Indian Lakhs (1 Lakh = 100,000 rupees)
-- When displaying AUM values, ALWAYS multiply by 100,000 (10^5) to convert from lakhs to rupees
-- Example: If aum_in_lakhs = 196049.8, display as ₹19,60,49,80,000 (196049.8 × 100,000)
+- When displaying AUM values, ALWAYS multiply by 100,000 to convert from lakhs to rupees
+- Example: If aum_in_lakhs = 196049.8, display as ₹19,60,49,80,000
 - Use proper Indian number formatting with commas for readability
 
-**IMPORTANT - Returns Data Parsing:**
-- The `returns_data` column contains JSONB data with time period keys and return values
-- JSON format example: {{"1d": -0.05, "1m": 0.03, "1y": 9.23, "3y": 12.45, "5y": 15.67}}
-- Time period keys: "1d" (1 day), "1m" (1 month), "6m" (6 months), "1y" (1 year), "3y" (3 years), "5y" (5 years), "10y" (10 years)
-- Use PostgreSQL JSONB operators to extract specific returns: returns_data->>'1y' for 1-year returns
-- Example SQL: SELECT scheme_name, returns_data->>'1y' as return_1y FROM schemes WHERE returns_data IS NOT NULL
-- Always convert extracted values to numeric and format as percentages for display
+**IMPORTANT - Query Routing Guidelines:**
+1. **Fund Information**: Use `schemes` table for basic fund details, categories, AUM, NAV
+2. **Performance Data**: Use `scheme_returns` for time-period returns (1d, 1m, 6m, 1y, 3y, 5y, 7y, 10y)
+3. **Risk Analysis**: Use `sharpe_ratios` for risk-adjusted performance metrics
+4. **Trading Info**: Use `bse_details` for transaction capabilities, exit loads, lock-in periods
+5. **SIP Details**: Use `sip_configurations` for SIP amounts, dates, installments
+6. **Investment Limits**: Use `transaction_configurations` for purchase/redemption limits
+7. **Historical Analysis**: Use `historical_nav` for NAV trends, volatility, time-series analysis
 
-**Key Relationships:**
-- schemes.id ↔ bse_details.scheme_id
-- schemes.id ↔ returns_history.scheme_id
-- schemes.id ↔ historical_nav_data.scheme_id
+**Common Query Patterns:**
+- **Fund Search**: Filter by `amfi_broad`, `amfi_sub`, `risk_level`, `aum_in_lakhs`
+- **Performance**: JOIN schemes + scheme_returns for returns analysis
+- **Risk-Adjusted**: JOIN schemes + scheme_returns + sharpe_ratios
+- **Investment Options**: JOIN schemes + bse_details + sip_configurations + transaction_configurations
+- **Historical Analysis**: JOIN schemes + historical_nav for time-series queries
 
-**Available Views:**
-- `scheme_summary`: Comprehensive scheme overview with aggregated metrics
-- `top_performers`: Best performing schemes ranked by returns
-- `category_performance`: Category-wise performance analysis
+**Filtering & Sorting Best Practices:**
+- Use `amfi_broad` for category filtering (Equity, Debt, Hybrid, Other, Solution Oriented)
+- Use `amfi_sub` for specific fund types (Large Cap Fund, Liquid Fund, ELSS, etc.)
+- Sort by `aum_in_lakhs DESC` for largest funds
+- Sort by returns columns (`yrs1`, `yrs3`, `yrs5`) for performance ranking
+- Use `risk_level` for risk-based filtering (1=lowest risk, 5=highest risk)
+- Filter by `sip_allowed = true` or `purchase_allowed = true` for investment options
 
-**IMPORTANT - Query Guidelines:**
-1. Be efficient: Use the minimum number of tool calls needed to answer the question
-2. First check available tables with sql_db_list_tables if needed
-3. Then query the data with sql_db_query, limiting results to 5 rows unless specified
-4. Provide your final answer immediately after getting the query results
-5. Don't repeatedly query the same information
-6. If you get an error, try a simpler approach instead of complex workarounds
-
-**AUM Display Rules:**
-- When showing AUM values, ALWAYS convert from lakhs to rupees by multiplying by 100,000
-- Format numbers with Indian comma notation (e.g., ₹19,60,49,80,000)
-- Never show raw lakh values to users - always convert to full rupee amounts
-
-**Returns Data Query Rules:**
-- When users ask for returns for specific time periods, use JSONB operators to extract the correct values
-- Map user queries to JSON keys: "1 year" → "1y", "3 years" → "3y", "1 month" → "1m", etc.
-- Use SQL like: SELECT scheme_name, (returns_data->>'1y')::numeric as return_1y FROM schemes
-- Format return values as percentages (multiply by 100 if needed and add % symbol)
-- Handle NULL values gracefully - show "N/A" if returns data is missing
+**Query Guidelines:**
+1. Always use appropriate JOINs based on the relationships shown above
+2. Limit results to 10 rows unless user specifies otherwise
+3. Use proper WHERE clauses for filtering by category, risk level, or AUM
+4. Apply ORDER BY for meaningful sorting (performance, AUM, alphabetical)
+5. Handle NULL values gracefully in returns and Sharpe ratio data
+6. Use JSONB operators for `allowed_dates` in SIP configurations
 
 **Response Format:**
 - Execute necessary tools to get the data
-- Apply AUM conversion and returns parsing before displaying results
-- Use proper JSONB extraction for returns data based on user's time period request
-- Provide a clear, concise answer based on the results
+- Apply AUM conversion (lakhs to rupees) before displaying results
+- Format return values as percentages with proper decimal places
+- Provide clear, concise answers based on query results
 - Stop after providing the answer - don't ask follow-up questions
 
-Remember: Be direct and efficient. Answer the user's question with the data you retrieve, then stop."""
+Remember: Be direct and efficient. Use the correct table relationships and filtering for accurate results."""
         
         # Create modern prompt structure with chat history support
         prompt = ChatPromptTemplate.from_messages([

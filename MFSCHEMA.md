@@ -1,614 +1,951 @@
 # Mutual Fund Database Schema Documentation
 
-**Database:** `mutual_fund_db`  
-**Source API:** https://apis.mfapis.in/api/v1/scheme/list/all  
-**Engine:** PostgreSQL 12+  
-**Character Set:** UTF8  
+## Overview
+
+The `mutual_fund` PostgreSQL database contains comprehensive mutual fund data from MF APIs Club with 6 interconnected tables storing 14,562+ records across 1,487 mutual fund schemes.
+
+### Database Statistics
+- **Total Schemes**: 1,487
+- **Performance Records**: 1,486 
+- **Sharpe Ratios**: 267
+- **BSE Trading Details**: 2,889
+- **SIP Configurations**: 3,961
+- **Transaction Configs**: 5,778
+
+### Data Source
+- **API**: https://app.mfapis.club/api/v1/scheme/list
+- **Update Frequency**: Real-time via API
+- **Coverage**: All AMFI registered mutual funds
 
 ---
 
-## 🗄️ **Database Overview**
+## Table Relationships
 
-### **Purpose**
-Comprehensive mutual fund database storing complete scheme data, BSE trading details, returns history, and performance analytics from the mfapis.in API endpoint.
-
-### **Database Statistics**
-- **Total Schemes:** 1,488 mutual fund schemes
-- **BSE Details:** 2,891 trading records  
-- **Returns Records:** 9,827 performance data points
-- **Total Records:** ~14,000+ across all tables
-- **Database Size:** ~50MB
-- **Processing Time:** 0.1 minutes (API fetch + import)
-
-### **Key Features**
-- ✅ Complete scheme metadata with AMFI classifications
-- ✅ Normalized BSE trading information 
-- ✅ Time-series returns data (1 day to 10 years)
-- ✅ JSONB fields for flexible data storage
-- ✅ Comprehensive indexing for performance
-- ✅ Analysis views for quick insights
-- ✅ Real-time NAV and AUM data
-
----
-
-## 📊 **Table Structure**
-
-### **Table 1: `schemes`**
-
-**Purpose:** Main table containing comprehensive mutual fund scheme information
-
-**Row Count:** 1,488 records  
-**Primary Key:** `id`  
-**Storage Engine:** PostgreSQL  
-
-| Column Name | Data Type | Max Length | Nullable | Default | Constraints | Description | Sample Values |
-|-------------|-----------|------------|----------|---------|-------------|-------------|---------------|
-| `id` | VARCHAR | 50 | NOT NULL | - | PRIMARY KEY | Unique API identifier for the scheme | 'sch_01JWVNGBX9CQGF2SG93J4EQFV0' |
-| `scheme_code` | VARCHAR | 20 | NOT NULL | - | UNIQUE | Numerical scheme code used across APIs | '105823', '149140', '140328' |
-| `scheme_name` | TEXT | Variable | NOT NULL | - | - | Full official name of the mutual fund scheme | 'LIC MF Banking & PSU Fund Growth' |
-| `amfi_broad` | VARCHAR | 50 | YES | NULL | - | AMFI broad category classification | 'Equity', 'Debt', 'Hybrid', 'Other' |
-| `amfi_sub` | VARCHAR | 100 | YES | NULL | - | AMFI sub-category detailed classification | 'Banking and PSU Fund', 'Sectoral / Thematic' |
-| `aum_in_lakhs` | DECIMAL | (20,2) | YES | NULL | - | Assets Under Management in Indian Lakhs | 196049.8, 58228.28, 12140.44 |
-| `sip_allowed` | BOOLEAN | - | YES | FALSE | - | Whether Systematic Investment Plan is permitted | true, false |
-| `purchase_allowed` | BOOLEAN | - | YES | FALSE | - | Whether direct purchase transactions are allowed | true, false |
-| `risk_level` | INTEGER | - | YES | NULL | - | Investment risk rating (1-5 scale) | 1, 2, 3, 4, 5 |
-| `amc_code` | VARCHAR | 50 | YES | NULL | - | Asset Management Company identifier code | 'LICMUTUALFUND_MF', 'BARODABNPPARIBASMUTUALFUND_MF' |
-| `current_nav` | DECIMAL | (15,6) | YES | NULL | - | Current Net Asset Value per unit | 34.9318, 15.7556, 17.2871 |
-| `amc_img_url` | TEXT | Variable | YES | NULL | - | URL to AMC logo/image | 'https://example.com/logo.png' |
-| `returns_data` | JSONB | Variable | YES | NULL | - | Complete returns data in JSON format | `{"1d": -0.05, "1m": 0.03, "1y": 9.23}` |
-| `sharpe_ratios` | JSONB | Variable | YES | NULL | - | Sharpe ratios for risk-adjusted returns | `{"3y": 1.25, "5y": 1.18}` |
-| `nav_history` | JSONB | Variable | YES | NULL | - | Historical NAV data array | `[{"date": "2024-01-01", "nav": 34.93}]` |
-| `created_at` | TIMESTAMP | - | NO | CURRENT_TIMESTAMP | - | Record creation timestamp | '2025-06-27 21:59:21' |
-| `updated_at` | TIMESTAMP | - | NO | CURRENT_TIMESTAMP | - | Record last update timestamp | '2025-06-27 21:59:21' |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_schemes_code ON schemes(scheme_code);
-CREATE INDEX idx_schemes_amfi_broad ON schemes(amfi_broad);
-CREATE INDEX idx_schemes_amfi_sub ON schemes(amfi_sub);
-CREATE INDEX idx_schemes_risk_level ON schemes(risk_level);
-CREATE INDEX idx_schemes_amc_code ON schemes(amc_code);
-CREATE INDEX idx_schemes_aum ON schemes(aum_in_lakhs DESC);
-CREATE INDEX idx_schemes_nav ON schemes(current_nav);
+```
+schemes (1:1) ← scheme_returns
+schemes (1:1) ← sharpe_ratios  
+schemes (1:M) → bse_details
+bse_details (1:M) → sip_configurations
+bse_details (1:M) → transaction_configurations
 ```
 
 ---
 
-### **Table 2: `bse_details`**
+## 1. SCHEMES Table
 
-**Purpose:** Normalized BSE (Bombay Stock Exchange) trading information for each scheme
+**Purpose**: Core mutual fund information and metadata
 
-**Row Count:** 2,891 records  
-**Primary Key:** `id`  
-**Foreign Keys:** `scheme_id` → `schemes.id`  
+| Column | Type | Description |
+|--------|------|-------------|
+| id | TEXT (PK) | Unique scheme identifier from MF APIs Club |
+| scheme_code | TEXT (UNIQUE) | AMFI scheme code |
+| scheme_name | TEXT | Full scheme name |
+| amfi_broad | TEXT | Broad category (Equity, Debt, Hybrid, Other, Solution Oriented) |
+| amfi_sub | TEXT | Sub-category (Large Cap Fund, Liquid Fund, etc.) |
+| aum_in_lakhs | DECIMAL(15,2) | Assets Under Management in lakhs |
+| current_nav | DECIMAL(10,6) | Latest Net Asset Value |
+| risk_level | INTEGER | Risk rating 1-5 (1=lowest, 5=highest) |
+| amc_code | TEXT | Asset Management Company code |
+| amc_img_url | TEXT | AMC logo URL |
+| sip_allowed | BOOLEAN | SIP investment allowed |
+| purchase_allowed | BOOLEAN | Lump sum purchase allowed |
+| created_at | TIMESTAMP | Record creation time |
+| updated_at | TIMESTAMP | Last update time |
 
-| Column Name | Data Type | Max Length | Nullable | Default | Constraints | Description | Sample Values |
-|-------------|-----------|------------|----------|---------|-------------|-------------|---------------|
-| `id` | SERIAL | - | NOT NULL | AUTO_INCREMENT | PRIMARY KEY | Auto-incrementing unique identifier | 1, 2, 3... |
-| `scheme_id` | VARCHAR | 50 | NOT NULL | - | FOREIGN KEY | References schemes.id | 'sch_01JWVNGBX9CQGF2SG93J4EQFV0' |
-| `bse_code` | VARCHAR | 20 | YES | NULL | - | BSE trading code for the scheme | 'LCLPGP-GR', 'BPBCGP-GR' |
-| `sip_flag` | BOOLEAN | - | YES | NULL | - | Whether SIP is available through BSE | true, false |
-| `stp_flag` | BOOLEAN | - | YES | NULL | - | Whether STP (Systematic Transfer Plan) is available | true, false |
-| `swp_flag` | BOOLEAN | - | YES | NULL | - | Whether SWP (Systematic Withdrawal Plan) is available | true, false |
-| `switch_flag` | BOOLEAN | - | YES | NULL | - | Whether switching between schemes is allowed | true, false |
-| `lock_in_flag` | BOOLEAN | - | YES | NULL | - | Whether the scheme has a lock-in period | true, false |
-| `lock_in_period_months` | INTEGER | - | YES | NULL | - | Lock-in period duration in months | 36, 60, 12 |
-| `exit_load_flag` | BOOLEAN | - | YES | NULL | - | Whether exit load is applicable | true, false |
-| `exit_load_message` | TEXT | Variable | YES | NULL | - | Details about exit load conditions | 'NIL', '1% if redeemed within 1 year' |
-| `purchase_allowed` | BOOLEAN | - | YES | NULL | - | Whether fresh purchases are allowed | true, false |
-| `purchase_fresh_min` | DECIMAL | (15,2) | YES | NULL | - | Minimum amount for fresh purchase | 500.00, 1000.00, 5000.00 |
-| `purchase_additional_min` | DECIMAL | (15,2) | YES | NULL | - | Minimum amount for additional purchase | 100.00, 500.00, 1000.00 |
-| `purchase_max` | DECIMAL | (15,2) | YES | NULL | - | Maximum purchase amount allowed | 999999999.00, 1000000.00 |
-| `purchase_delta` | DECIMAL | (15,2) | YES | NULL | - | Purchase amount increment/delta | 1.00, 100.00, 500.00 |
-| `redemption_allowed` | BOOLEAN | - | YES | NULL | - | Whether redemptions are allowed | true, false |
-| `redemption_min_amount` | DECIMAL | (15,2) | YES | NULL | - | Minimum redemption amount | 500.00, 1000.00 |
-| `redemption_max_amount` | DECIMAL | (15,2) | YES | NULL | - | Maximum redemption amount | 999999999.00 |
-| `redemption_min_quantity` | DECIMAL | (15,2) | YES | NULL | - | Minimum redemption quantity/units | 0.001, 1.000 |
-| `redemption_max_quantity` | DECIMAL | (15,2) | YES | NULL | - | Maximum redemption quantity/units | 999999999.000 |
-| `sip_dates` | TEXT | Variable | YES | NULL | - | Available SIP dates (comma-separated) | '1,5,10,15,20,25', 'Daily' |
-| `sip_min_amount` | DECIMAL | (15,2) | YES | NULL | - | Minimum SIP amount | 100.00, 500.00, 1000.00 |
-| `sip_max_amount` | DECIMAL | (15,2) | YES | NULL | - | Maximum SIP amount | 999999999.00, 100000.00 |
-| `sip_delta_amount` | DECIMAL | (15,2) | YES | NULL | - | SIP amount increment/delta | 1.00, 100.00, 500.00 |
-| `sip_min_installments` | INTEGER | - | YES | NULL | - | Minimum number of SIP installments | 6, 12, 24 |
-| `sip_max_installments` | INTEGER | - | YES | NULL | - | Maximum number of SIP installments | 999, 240, 120 |
-| `daily_sip_min_amount` | DECIMAL | (15,2) | YES | NULL | - | Minimum daily SIP amount | 100.00, 500.00 |
-| `daily_sip_max_amount` | DECIMAL | (15,2) | YES | NULL | - | Maximum daily SIP amount | 50000.00, 100000.00 |
-| `daily_sip_min_installments` | INTEGER | - | YES | NULL | - | Minimum daily SIP installments | 30, 60, 90 |
-| `daily_sip_max_installments` | INTEGER | - | YES | NULL | - | Maximum daily SIP installments | 999, 365, 730 |
-| `created_at` | TIMESTAMP | - | NO | CURRENT_TIMESTAMP | - | Record creation timestamp | '2025-06-27 21:59:21' |
+### Text-to-SQL Examples
 
-**Indexes:**
+**1. "Find all large cap equity funds with AUM greater than 1000 crores"**
 ```sql
-CREATE INDEX idx_bse_scheme_id ON bse_details(scheme_id);
-CREATE INDEX idx_bse_code ON bse_details(bse_code);
+SELECT scheme_name, aum_in_lakhs, current_nav, risk_level
+FROM schemes 
+WHERE amfi_broad = 'Equity' 
+    AND amfi_sub = 'Large Cap Fund'
+    AND aum_in_lakhs > 100000
+ORDER BY aum_in_lakhs DESC;
 ```
 
-**Constraints:**
+**2. "Show me the top 10 schemes by AUM in each category"**
 ```sql
-FOREIGN KEY (scheme_id) REFERENCES schemes(id) ON DELETE CASCADE
+SELECT amfi_broad, scheme_name, aum_in_lakhs,
+       ROW_NUMBER() OVER (PARTITION BY amfi_broad ORDER BY aum_in_lakhs DESC) as rank
+FROM schemes
+WHERE aum_in_lakhs IS NOT NULL
+QUALIFY rank <= 10
+ORDER BY amfi_broad, rank;
 ```
 
----
-
-### **Table 3: `returns_history`**
-
-**Purpose:** Time-series returns data for performance analysis across different periods
-
-**Row Count:** 9,827 records  
-**Primary Key:** `id`  
-**Foreign Keys:** `scheme_id` → `schemes.id`  
-
-| Column Name | Data Type | Max Length | Nullable | Default | Constraints | Description | Sample Values |
-|-------------|-----------|------------|----------|---------|-------------|-------------|---------------|
-| `id` | SERIAL | - | NOT NULL | AUTO_INCREMENT | PRIMARY KEY | Auto-incrementing unique identifier | 1, 2, 3... |
-| `scheme_id` | VARCHAR | 50 | NOT NULL | - | FOREIGN KEY | References schemes.id | 'sch_01JWVNGBX9CQGF2SG93J4EQFV0' |
-| `period` | VARCHAR | 10 | NOT NULL | - | - | Return calculation period | '1d', '1m', '6m', '1y', '3y', '5y', '10y' |
-| `return_value` | DECIMAL | (8,4) | YES | NULL | - | Return percentage for the period | -0.05, 9.23, 15.67, -2.34 |
-| `data_date` | DATE | - | YES | CURRENT_DATE | - | Date when the return was calculated | '2025-06-27' |
-| `created_at` | TIMESTAMP | - | NO | CURRENT_TIMESTAMP | - | Record creation timestamp | '2025-06-27 21:59:21' |
-
-**Indexes:**
+**3. "List all SIP-enabled debt funds with low risk (level 1-2)"**
 ```sql
-CREATE INDEX idx_returns_scheme_period ON returns_history(scheme_id, period);
-CREATE INDEX idx_returns_period ON returns_history(period);
+SELECT scheme_name, amfi_sub, risk_level, current_nav, aum_in_lakhs
+FROM schemes
+WHERE amfi_broad = 'Debt'
+    AND sip_allowed = true
+    AND risk_level <= 2
+ORDER BY aum_in_lakhs DESC;
 ```
 
-**Constraints:**
+**4. "Find schemes from HDFC AMC with current NAV between 10-50"**
 ```sql
-FOREIGN KEY (scheme_id) REFERENCES schemes(id) ON DELETE CASCADE;
-UNIQUE(scheme_id, period, data_date);
+SELECT scheme_name, amfi_sub, current_nav, aum_in_lakhs
+FROM schemes
+WHERE amc_code LIKE '%HDFC%'
+    AND current_nav BETWEEN 10 AND 50
+ORDER BY current_nav;
+```
+
+**5. "Show category-wise fund count and average AUM"**
+```sql
+SELECT amfi_broad, 
+       COUNT(*) as fund_count,
+       ROUND(AVG(aum_in_lakhs), 2) as avg_aum_lakhs,
+       ROUND(AVG(current_nav), 4) as avg_nav
+FROM schemes
+GROUP BY amfi_broad
+ORDER BY fund_count DESC;
 ```
 
 ---
 
-## 📊 **Analysis Views**
+## 2. SCHEME_RETURNS Table
 
-### **View 1: `scheme_summary`**
+**Purpose**: Performance returns across multiple time periods
 
-**Purpose:** Comprehensive scheme overview with aggregated counts and key metrics
+| Column | Type | Description |
+|--------|------|-------------|
+| scheme_id | TEXT (PK, FK) | References schemes.id |
+| days1 | DECIMAL(8,4) | 1-day return percentage |
+| mths1 | DECIMAL(8,4) | 1-month return percentage |
+| mths6 | DECIMAL(8,4) | 6-month return percentage |
+| yrs1 | DECIMAL(8,4) | 1-year return percentage |
+| yrs2 | DECIMAL(8,4) | 2-year return percentage |
+| yrs3 | DECIMAL(8,4) | 3-year return percentage |
+| yrs5 | DECIMAL(8,4) | 5-year return percentage |
+| yrs7 | DECIMAL(8,4) | 7-year return percentage |
+| yrs10 | DECIMAL(8,4) | 10-year return percentage |
+| created_at | TIMESTAMP | Record creation time |
 
-**Based On:** JOIN between `schemes`, `bse_details`, and `returns_history` tables
+### Text-to-SQL Examples
 
-| Column Name | Data Type | Description | Sample Values |
-|-------------|-----------|-------------|---------------|
-| `id` | VARCHAR(50) | Scheme unique identifier | 'sch_01JWVNGBX9CQGF2SG93J4EQFV0' |
-| `scheme_code` | VARCHAR(20) | Numerical scheme code | '105823', '149140' |
-| `scheme_name` | TEXT | Full scheme name | 'LIC MF Banking & PSU Fund Growth' |
-| `amfi_broad` | VARCHAR(50) | Broad fund category | 'Equity', 'Debt', 'Hybrid' |
-| `amfi_sub` | VARCHAR(100) | Sub-category classification | 'Banking and PSU Fund', 'Large Cap' |
-| `amc_code` | VARCHAR(50) | Asset Management Company | 'LICMUTUALFUND_MF' |
-| `current_nav` | DECIMAL(15,6) | Current NAV | 34.931800 |
-| `aum_in_lakhs` | DECIMAL(20,2) | Assets Under Management | 196049.80 |
-| `risk_level` | INTEGER | Risk rating (1-5) | 1, 2, 3, 4, 5 |
-| `sip_allowed` | BOOLEAN | SIP availability | true, false |
-| `purchase_allowed` | BOOLEAN | Purchase availability | true, false |
-| `bse_options_count` | BIGINT | Number of BSE trading options | 1, 2, 3 |
-| `returns_periods_count` | BIGINT | Number of return periods available | 5, 7, 9 |
-
-**SQL Definition:**
+**1. "Find top 10 performing equity funds over 5 years"**
 ```sql
-CREATE OR REPLACE VIEW scheme_summary AS
+SELECT s.scheme_name, s.amfi_sub, sr.yrs5, sr.yrs3, sr.yrs1
+FROM schemes s
+JOIN scheme_returns sr ON s.id = sr.scheme_id
+WHERE s.amfi_broad = 'Equity' AND sr.yrs5 IS NOT NULL
+ORDER BY sr.yrs5 DESC
+LIMIT 10;
+```
+
+**2. "Show funds with consistent performance (positive returns across all periods)"**
+```sql
+SELECT s.scheme_name, s.amfi_broad, sr.yrs1, sr.yrs3, sr.yrs5
+FROM schemes s
+JOIN scheme_returns sr ON s.id = sr.scheme_id
+WHERE sr.yrs1 > 0 AND sr.yrs3 > 0 AND sr.yrs5 > 0
+ORDER BY (sr.yrs1 + sr.yrs3 + sr.yrs5) DESC;
+```
+
+**3. "Compare short-term vs long-term performance for hybrid funds"**
+```sql
+SELECT s.scheme_name, 
+       sr.mths6 as short_term,
+       sr.yrs5 as long_term,
+       (sr.yrs5 - sr.mths6) as performance_difference
+FROM schemes s
+JOIN scheme_returns sr ON s.id = sr.scheme_id
+WHERE s.amfi_broad = 'Hybrid'
+    AND sr.mths6 IS NOT NULL 
+    AND sr.yrs5 IS NOT NULL
+ORDER BY performance_difference DESC;
+```
+
+**4. "Find funds with recent outperformance (1-month > 1-year average)"**
+```sql
+SELECT s.scheme_name, s.amfi_sub, sr.mths1, sr.yrs1,
+       (sr.mths1 * 12) as annualized_recent
+FROM schemes s
+JOIN scheme_returns sr ON s.id = sr.scheme_id
+WHERE sr.mths1 IS NOT NULL 
+    AND sr.yrs1 IS NOT NULL
+    AND (sr.mths1 * 12) > sr.yrs1
+ORDER BY (sr.mths1 * 12 - sr.yrs1) DESC;
+```
+
+**5. "Calculate average returns by fund category and time period"**
+```sql
+SELECT s.amfi_broad,
+       ROUND(AVG(sr.yrs1), 2) as avg_1yr,
+       ROUND(AVG(sr.yrs3), 2) as avg_3yr,
+       ROUND(AVG(sr.yrs5), 2) as avg_5yr,
+       COUNT(*) as fund_count
+FROM schemes s
+JOIN scheme_returns sr ON s.id = sr.scheme_id
+GROUP BY s.amfi_broad
+ORDER BY avg_5yr DESC NULLS LAST;
+```
+
+---
+
+## 3. SHARPE_RATIOS Table
+
+**Purpose**: Risk-adjusted performance metrics
+
+| Column | Type | Description |
+|--------|------|-------------|
+| scheme_id | TEXT (PK, FK) | References schemes.id |
+| sharpe_3yr | DECIMAL(8,4) | 3-year Sharpe ratio |
+| sharpe_5yr | DECIMAL(8,4) | 5-year Sharpe ratio |
+| sharpe_10yr | DECIMAL(8,4) | 10-year Sharpe ratio |
+| created_at | TIMESTAMP | Record creation time |
+
+### Text-to-SQL Examples
+
+**1. "Find funds with best risk-adjusted returns (highest 5-year Sharpe ratio)"**
+```sql
+SELECT s.scheme_name, s.amfi_sub, s.risk_level,
+       sr.yrs5, sh.sharpe_5yr
+FROM schemes s
+JOIN scheme_returns sr ON s.id = sr.scheme_id
+JOIN sharpe_ratios sh ON s.id = sh.scheme_id
+WHERE sh.sharpe_5yr IS NOT NULL
+ORDER BY sh.sharpe_5yr DESC
+LIMIT 15;
+```
+
+**2. "Compare Sharpe ratios across different risk levels"**
+```sql
+SELECT s.risk_level,
+       COUNT(*) as fund_count,
+       ROUND(AVG(sh.sharpe_3yr), 3) as avg_sharpe_3yr,
+       ROUND(AVG(sh.sharpe_5yr), 3) as avg_sharpe_5yr,
+       ROUND(AVG(sr.yrs5), 2) as avg_return_5yr
+FROM schemes s
+JOIN sharpe_ratios sh ON s.id = sh.scheme_id
+JOIN scheme_returns sr ON s.id = sr.scheme_id
+WHERE sh.sharpe_5yr IS NOT NULL
+GROUP BY s.risk_level
+ORDER BY s.risk_level;
+```
+
+**3. "Find high-return funds with poor risk adjustment (low Sharpe ratio)"**
+```sql
+SELECT s.scheme_name, s.amfi_sub, sr.yrs5, sh.sharpe_5yr,
+       (sr.yrs5 / NULLIF(sh.sharpe_5yr, 0)) as return_to_sharpe_ratio
+FROM schemes s
+JOIN scheme_returns sr ON s.id = sr.scheme_id
+JOIN sharpe_ratios sh ON s.id = sh.scheme_id
+WHERE sr.yrs5 > 20 AND sh.sharpe_5yr < 0.8
+ORDER BY sr.yrs5 DESC;
+```
+
+**4. "Identify consistently good risk-adjusted performers across time periods"**
+```sql
+SELECT s.scheme_name, s.amfi_broad,
+       sh.sharpe_3yr, sh.sharpe_5yr, sh.sharpe_10yr
+FROM schemes s
+JOIN sharpe_ratios sh ON s.id = sh.scheme_id
+WHERE sh.sharpe_3yr > 0.8 
+    AND sh.sharpe_5yr > 0.8 
+    AND sh.sharpe_10yr > 0.5
+ORDER BY (sh.sharpe_3yr + sh.sharpe_5yr + sh.sharpe_10yr) DESC;
+```
+
+**5. "Show Sharpe ratio distribution by fund category"**
+```sql
+SELECT s.amfi_broad,
+       COUNT(*) as funds_with_sharpe,
+       MIN(sh.sharpe_5yr) as min_sharpe,
+       ROUND(AVG(sh.sharpe_5yr), 3) as avg_sharpe,
+       MAX(sh.sharpe_5yr) as max_sharpe,
+       ROUND(STDDEV(sh.sharpe_5yr), 3) as sharpe_volatility
+FROM schemes s
+JOIN sharpe_ratios sh ON s.id = sh.scheme_id
+WHERE sh.sharpe_5yr IS NOT NULL
+GROUP BY s.amfi_broad
+ORDER BY avg_sharpe DESC;
+```
+
+---
+
+## 4. BSE_DETAILS Table
+
+**Purpose**: BSE trading information and transaction capabilities
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | SERIAL (PK) | Auto-increment primary key |
+| scheme_id | TEXT (FK) | References schemes.id |
+| bse_code | TEXT | BSE trading code |
+| sip_flag | BOOLEAN | SIP transactions allowed |
+| stp_flag | BOOLEAN | STP (Systematic Transfer Plan) allowed |
+| swp_flag | BOOLEAN | SWP (Systematic Withdrawal Plan) allowed |
+| switch_flag | BOOLEAN | Fund switching allowed |
+| lock_in_flag | BOOLEAN | Lock-in period applicable |
+| lock_in_period_months | INTEGER | Lock-in duration in months |
+| exit_load_flag | BOOLEAN | Exit load applicable |
+| exit_load_message | TEXT | Detailed exit load conditions |
+| created_at | TIMESTAMP | Record creation time |
+
+### Text-to-SQL Examples
+
+**1. "Find funds with no exit load for immediate liquidity"**
+```sql
+SELECT s.scheme_name, s.amfi_broad, b.bse_code, b.exit_load_message
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+WHERE b.exit_load_flag = false
+ORDER BY s.aum_in_lakhs DESC;
+```
+
+**2. "Show funds supporting all transaction types (SIP, STP, SWP, Switch)"**
+```sql
+SELECT s.scheme_name, s.amfi_sub, b.bse_code
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+WHERE b.sip_flag = true 
+    AND b.stp_flag = true 
+    AND b.swp_flag = true 
+    AND b.switch_flag = true
+ORDER BY s.scheme_name;
+```
+
+**3. "List ELSS funds with their lock-in periods"**
+```sql
+SELECT s.scheme_name, b.lock_in_period_months, b.exit_load_message
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+WHERE s.amfi_sub = 'ELSS' OR b.lock_in_flag = true
+ORDER BY b.lock_in_period_months DESC NULLS LAST;
+```
+
+**4. "Find funds with complex exit load structures"**
+```sql
+SELECT s.scheme_name, s.amfi_sub, b.exit_load_message
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+WHERE b.exit_load_flag = true 
+    AND LENGTH(b.exit_load_message) > 100
+ORDER BY LENGTH(b.exit_load_message) DESC;
+```
+
+**5. "Count transaction capabilities by fund category"**
+```sql
+SELECT s.amfi_broad,
+       COUNT(*) as total_options,
+       SUM(CASE WHEN b.sip_flag THEN 1 ELSE 0 END) as sip_enabled,
+       SUM(CASE WHEN b.swp_flag THEN 1 ELSE 0 END) as swp_enabled,
+       SUM(CASE WHEN b.switch_flag THEN 1 ELSE 0 END) as switch_enabled,
+       SUM(CASE WHEN b.exit_load_flag THEN 1 ELSE 0 END) as with_exit_load
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+GROUP BY s.amfi_broad
+ORDER BY total_options DESC;
+```
+
+---
+
+## 5. SIP_CONFIGURATIONS Table
+
+**Purpose**: Systematic Investment Plan parameters and limits
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | SERIAL (PK) | Auto-increment primary key |
+| bse_detail_id | INTEGER (FK) | References bse_details.id |
+| sip_type | TEXT | 'regular' or 'daily' SIP |
+| min_amount | DECIMAL(15,2) | Minimum SIP amount |
+| max_amount | DECIMAL(15,2) | Maximum SIP amount |
+| amount_delta | DECIMAL(15,2) | Amount increment step |
+| min_installments | INTEGER | Minimum number of installments |
+| max_installments | INTEGER | Maximum number of installments |
+| allowed_dates | JSONB | Array of allowed SIP dates (1-31) |
+| created_at | TIMESTAMP | Record creation time |
+
+### Text-to-SQL Examples
+
+**1. "Find funds with very low minimum SIP amounts (under ₹500)"**
+```sql
+SELECT s.scheme_name, s.amfi_sub, sip.min_amount, sip.sip_type, b.bse_code
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+JOIN sip_configurations sip ON b.id = sip.bse_detail_id
+WHERE sip.min_amount <= 500
+ORDER BY sip.min_amount, s.scheme_name;
+```
+
+**2. "Show daily SIP options with their minimum requirements"**
+```sql
+SELECT s.scheme_name, s.amfi_broad, sip.min_amount, sip.min_installments
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+JOIN sip_configurations sip ON b.id = sip.bse_detail_id
+WHERE sip.sip_type = 'daily'
+ORDER BY sip.min_amount;
+```
+
+**3. "Find flexible SIP options with wide amount ranges"**
+```sql
+SELECT s.scheme_name, sip.min_amount, sip.max_amount,
+       (sip.max_amount - sip.min_amount) as amount_range,
+       sip.allowed_dates
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+JOIN sip_configurations sip ON b.id = sip.bse_detail_id
+WHERE sip.max_amount > sip.min_amount * 100
+ORDER BY amount_range DESC;
+```
+
+**4. "Show SIP date flexibility by extracting allowed dates"**
+```sql
+SELECT s.scheme_name, sip.sip_type, sip.min_amount,
+       jsonb_array_length(sip.allowed_dates) as date_options,
+       sip.allowed_dates
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+JOIN sip_configurations sip ON b.id = sip.bse_detail_id
+WHERE sip.allowed_dates IS NOT NULL
+ORDER BY date_options DESC;
+```
+
+**5. "Compare SIP parameters across fund categories"**
+```sql
+SELECT s.amfi_broad,
+       COUNT(*) as sip_options,
+       MIN(sip.min_amount) as lowest_min_sip,
+       ROUND(AVG(sip.min_amount), 2) as avg_min_sip,
+       MAX(sip.max_amount) as highest_max_sip
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+JOIN sip_configurations sip ON b.id = sip.bse_detail_id
+GROUP BY s.amfi_broad
+ORDER BY avg_min_sip;
+```
+
+---
+
+## 6. TRANSACTION_CONFIGURATIONS Table
+
+**Purpose**: Purchase and redemption rules and limits
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | SERIAL (PK) | Auto-increment primary key |
+| bse_detail_id | INTEGER (FK) | References bse_details.id |
+| transaction_type | TEXT | 'purchase' or 'redemption' |
+| allowed | BOOLEAN | Transaction type allowed |
+| min_amount | DECIMAL(15,2) | Minimum transaction amount |
+| max_amount | DECIMAL(15,2) | Maximum transaction amount |
+| amount_delta | DECIMAL(15,2) | Amount increment step |
+| min_quantity | DECIMAL(15,6) | Minimum units for transaction |
+| max_quantity | DECIMAL(15,6) | Maximum units for transaction |
+| quantity_delta | DECIMAL(15,6) | Unit increment step |
+| fresh_min | DECIMAL(15,2) | Minimum fresh investment |
+| additional_min | DECIMAL(15,2) | Minimum additional investment |
+| created_at | TIMESTAMP | Record creation time |
+
+### Text-to-SQL Examples
+
+**1. "Find funds with low minimum purchase amounts for new investors"**
+```sql
+SELECT s.scheme_name, s.amfi_sub, tc.fresh_min, tc.additional_min
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+JOIN transaction_configurations tc ON b.id = tc.bse_detail_id
+WHERE tc.transaction_type = 'purchase' 
+    AND tc.allowed = true
+    AND tc.fresh_min <= 1000
+ORDER BY tc.fresh_min;
+```
+
+**2. "Show redemption flexibility (funds allowing partial redemptions)"**
+```sql
+SELECT s.scheme_name, s.amfi_broad, tc.min_amount as min_redemption,
+       tc.min_quantity as min_units_redemption
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+JOIN transaction_configurations tc ON b.id = tc.bse_detail_id
+WHERE tc.transaction_type = 'redemption' 
+    AND tc.allowed = true
+ORDER BY tc.min_amount NULLS LAST;
+```
+
+**3. "Compare purchase vs redemption limits for the same fund"**
+```sql
+SELECT s.scheme_name,
+       MAX(CASE WHEN tc.transaction_type = 'purchase' THEN tc.fresh_min END) as min_purchase,
+       MAX(CASE WHEN tc.transaction_type = 'redemption' THEN tc.min_amount END) as min_redemption,
+       MAX(CASE WHEN tc.transaction_type = 'purchase' THEN tc.allowed END) as purchase_allowed,
+       MAX(CASE WHEN tc.transaction_type = 'redemption' THEN tc.allowed END) as redemption_allowed
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+JOIN transaction_configurations tc ON b.id = tc.bse_detail_id
+GROUP BY s.scheme_name, s.id
+HAVING COUNT(DISTINCT tc.transaction_type) = 2
+ORDER BY min_purchase;
+```
+
+**4. "Find funds with high minimum investment requirements (premium funds)"**
+```sql
+SELECT s.scheme_name, s.amfi_sub, s.aum_in_lakhs, tc.fresh_min
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+JOIN transaction_configurations tc ON b.id = tc.bse_detail_id
+WHERE tc.transaction_type = 'purchase' 
+    AND tc.fresh_min > 100000
+ORDER BY tc.fresh_min DESC;
+```
+
+**5. "Analyze transaction accessibility by fund category"**
+```sql
+SELECT s.amfi_broad,
+       COUNT(*) as total_transaction_configs,
+       SUM(CASE WHEN tc.transaction_type = 'purchase' AND tc.allowed THEN 1 ELSE 0 END) as purchase_enabled,
+       SUM(CASE WHEN tc.transaction_type = 'redemption' AND tc.allowed THEN 1 ELSE 0 END) as redemption_enabled,
+       ROUND(AVG(CASE WHEN tc.transaction_type = 'purchase' THEN tc.fresh_min END), 2) as avg_min_investment
+FROM schemes s
+JOIN bse_details b ON s.id = b.scheme_id
+JOIN transaction_configurations tc ON b.id = tc.bse_detail_id
+GROUP BY s.amfi_broad
+ORDER BY avg_min_investment;
+```
+
+---
+
+## Advanced Multi-Table Queries
+
+### Portfolio Construction Query
+```sql
+-- Build a diversified portfolio with different risk levels and categories
 SELECT 
-    s.id,
-    s.scheme_code,
-    s.scheme_name,
     s.amfi_broad,
-    s.amfi_sub,
-    s.amc_code,
+    s.scheme_name,
+    s.risk_level,
+    sr.yrs5 as five_year_return,
+    sh.sharpe_5yr,
+    sip.min_amount as min_sip,
+    CASE WHEN b.exit_load_flag THEN 'Yes' ELSE 'No' END as exit_load
+FROM schemes s
+JOIN scheme_returns sr ON s.id = sr.scheme_id
+LEFT JOIN sharpe_ratios sh ON s.id = sh.scheme_id
+JOIN bse_details b ON s.id = b.scheme_id
+JOIN sip_configurations sip ON b.id = sip.bse_detail_id
+WHERE s.sip_allowed = true 
+    AND sip.min_amount <= 2000
+    AND sr.yrs5 > 12
+    AND s.risk_level BETWEEN 2 AND 4
+ORDER BY s.amfi_broad, sr.yrs5 DESC;
+```
+
+### Investment Platform Query
+```sql
+-- Complete fund information for investment platform display
+SELECT 
+    s.scheme_name,
+    s.amfi_broad || ' - ' || s.amfi_sub as category,
     s.current_nav,
     s.aum_in_lakhs,
     s.risk_level,
-    s.sip_allowed,
-    s.purchase_allowed,
-    COUNT(b.id) as bse_options_count,
-    COUNT(r.id) as returns_periods_count
+    sr.yrs1, sr.yrs3, sr.yrs5,
+    sh.sharpe_5yr,
+    sip.min_amount as min_sip,
+    tc.fresh_min as min_lumpsum,
+    b.exit_load_message
 FROM schemes s
+LEFT JOIN scheme_returns sr ON s.id = sr.scheme_id
+LEFT JOIN sharpe_ratios sh ON s.id = sh.scheme_id
 LEFT JOIN bse_details b ON s.id = b.scheme_id
-LEFT JOIN returns_history r ON s.id = r.scheme_id
-GROUP BY s.id, s.scheme_code, s.scheme_name, s.amfi_broad, 
-         s.amfi_sub, s.amc_code, s.current_nav, s.aum_in_lakhs, 
-         s.risk_level, s.sip_allowed, s.purchase_allowed;
+LEFT JOIN sip_configurations sip ON b.id = sip.bse_detail_id AND sip.sip_type = 'regular'
+LEFT JOIN transaction_configurations tc ON b.id = tc.bse_detail_id AND tc.transaction_type = 'purchase'
+WHERE s.purchase_allowed = true OR s.sip_allowed = true
+ORDER BY s.aum_in_lakhs DESC;
 ```
 
 ---
 
-### **View 2: `top_performers`**
+## Database Maintenance
 
-**Purpose:** Best performing schemes ranked by returns across different time periods
+### Update Script
+```bash
+# Refresh data from MF APIs Club
+python3 setup_mfapis_club_postgresql.py
+```
 
-**Based On:** JOIN between `schemes` and `returns_history` tables
+### Backup Command
+```bash
+pg_dump mutual_fund > mutual_fund_backup_$(date +%Y%m%d).sql
+```
 
-| Column Name | Data Type | Description | Sample Values |
-|-------------|-----------|-------------|---------------|
-| `scheme_name` | TEXT | Full scheme name | 'HDFC Large Cap Fund Growth' |
-| `amfi_broad` | VARCHAR(50) | Broad fund category | 'Equity', 'Debt' |
-| `amc_code` | VARCHAR(50) | Asset Management Company | 'HDFCMUTUALF' |
-| `current_nav` | DECIMAL(15,6) | Current NAV | 245.670000 |
-| `aum_in_lakhs` | DECIMAL(20,2) | Assets Under Management | 1234567.89 |
-| `return_1y` | DECIMAL(8,4) | 1-year return percentage | 15.67, 12.34, 9.87 |
-| `return_3y` | DECIMAL(8,4) | 3-year return percentage | 18.45, 14.23, 11.56 |
-| `return_5y` | DECIMAL(8,4) | 5-year return percentage | 16.78, 13.45, 10.23 |
+### Performance Optimization
+- All foreign keys have indexes
+- Frequently queried columns are indexed
+- JSONB columns support GIN indexes for array operations
 
-**SQL Definition:**
+---
+
+## 7. HISTORICAL_NAV Table
+
+**Purpose**: Complete historical Net Asset Value data for all mutual fund schemes
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | SERIAL (PK) | Auto-increment primary key |
+| scheme_id | TEXT (FK) | References schemes.id |
+| scheme_code | TEXT | AMFI scheme code for reference |
+| nav_date | DATE | Date of NAV record |
+| nav_value | DECIMAL(12,6) | Net Asset Value on the date |
+| data_source | TEXT | Data source ('mfapi') |
+| created_at | TIMESTAMP | Record creation time |
+| updated_at | TIMESTAMP | Last update time |
+
+**Indexes**: Optimized for date-range queries and scheme lookups
+- `idx_historical_nav_scheme_date` (scheme_id, nav_date DESC)
+- `idx_historical_nav_date` (nav_date DESC)
+- `idx_historical_nav_scheme_code` (scheme_code)
+
+**Data Coverage**: 3,037,708 records spanning April 1, 2006 to September 10, 2025
+
+### Text-to-SQL Examples
+
+**1. "Calculate 1-year returns for all equity funds as of latest date"**
 ```sql
-CREATE OR REPLACE VIEW top_performers AS
+WITH latest_nav AS (
+    SELECT h.scheme_id, h.nav_value as current_nav, h.nav_date as current_date
+    FROM historical_nav h
+    INNER JOIN (
+        SELECT scheme_id, MAX(nav_date) as max_date
+        FROM historical_nav
+        GROUP BY scheme_id
+    ) latest ON h.scheme_id = latest.scheme_id AND h.nav_date = latest.max_date
+),
+year_ago_nav AS (
+    SELECT DISTINCT ON (h.scheme_id) 
+        h.scheme_id, h.nav_value as year_ago_nav, h.nav_date as year_ago_date
+    FROM historical_nav h
+    INNER JOIN latest_nav l ON h.scheme_id = l.scheme_id
+    WHERE h.nav_date <= l.current_date - INTERVAL '1 year'
+    ORDER BY h.scheme_id, h.nav_date DESC
+)
+SELECT 
+    s.scheme_name,
+    s.amfi_sub,
+    l.current_nav,
+    y.year_ago_nav,
+    ROUND(((l.current_nav - y.year_ago_nav) / y.year_ago_nav * 100), 2) as one_year_return_pct,
+    l.current_date,
+    y.year_ago_date
+FROM schemes s
+JOIN latest_nav l ON s.id = l.scheme_id
+JOIN year_ago_nav y ON s.id = y.scheme_id
+WHERE s.amfi_broad = 'Equity'
+ORDER BY one_year_return_pct DESC
+LIMIT 20;
+```
+
+**2. "Find the most volatile funds based on NAV standard deviation over last 2 years"**
+```sql
 SELECT 
     s.scheme_name,
     s.amfi_broad,
-    s.amc_code,
-    s.current_nav,
-    s.aum_in_lakhs,
-    r1y.return_value as return_1y,
-    r3y.return_value as return_3y,
-    r5y.return_value as return_5y
-FROM schemes s
-LEFT JOIN returns_history r1y ON s.id = r1y.scheme_id AND r1y.period = '1y'
-LEFT JOIN returns_history r3y ON s.id = r3y.scheme_id AND r3y.period = '3y'
-LEFT JOIN returns_history r5y ON s.id = r5y.scheme_id AND r5y.period = '5y'
-WHERE r1y.return_value IS NOT NULL
-ORDER BY r1y.return_value DESC;
-```
-
----
-
-### **View 3: `category_performance`**
-
-**Purpose:** Category-wise performance analysis and aggregated statistics
-
-**Based On:** JOIN between `schemes` and `returns_history` tables with aggregation
-
-| Column Name | Data Type | Description | Sample Values |
-|-------------|-----------|-------------|---------------|
-| `amfi_broad` | VARCHAR(50) | Broad fund category | 'Equity', 'Debt', 'Hybrid' |
-| `amfi_sub` | VARCHAR(100) | Sub-category classification | 'Large Cap', 'Banking and PSU Fund' |
-| `scheme_count` | BIGINT | Number of schemes in category | 512, 326, 169 |
-| `avg_nav` | NUMERIC | Average NAV across category | 125.45, 89.67, 156.78 |
-| `total_aum` | NUMERIC | Total AUM for category (in Lakhs) | 33361074.00, 15678234.50 |
-| `avg_return_1y` | NUMERIC | Average 1-year return | 12.34, 8.76, 15.23 |
-| `avg_return_3y` | NUMERIC | Average 3-year return | 14.56, 9.87, 16.45 |
-| `avg_return_5y` | NUMERIC | Average 5-year return | 13.78, 8.45, 15.67 |
-| `avg_risk_level` | NUMERIC | Average risk level | 3.5, 2.1, 4.2 |
-
-**SQL Definition:**
-```sql
-CREATE OR REPLACE VIEW category_performance AS
-SELECT 
-    s.amfi_broad,
     s.amfi_sub,
-    COUNT(*) as scheme_count,
-    AVG(s.current_nav) as avg_nav,
-    SUM(s.aum_in_lakhs) as total_aum,
-    AVG(r1y.return_value) as avg_return_1y,
-    AVG(r3y.return_value) as avg_return_3y,
-    AVG(r5y.return_value) as avg_return_5y,
-    AVG(s.risk_level) as avg_risk_level
+    COUNT(h.nav_date) as data_points,
+    ROUND(AVG(h.nav_value), 4) as avg_nav,
+    ROUND(STDDEV(h.nav_value), 4) as nav_stddev,
+    ROUND((STDDEV(h.nav_value) / AVG(h.nav_value) * 100), 2) as coefficient_of_variation
 FROM schemes s
-LEFT JOIN returns_history r1y ON s.id = r1y.scheme_id AND r1y.period = '1y'
-LEFT JOIN returns_history r3y ON s.id = r3y.scheme_id AND r3y.period = '3y'
-LEFT JOIN returns_history r5y ON s.id = r5y.scheme_id AND r5y.period = '5y'
-WHERE s.amfi_broad IS NOT NULL
-GROUP BY s.amfi_broad, s.amfi_sub
-ORDER BY avg_return_1y DESC NULLS LAST;
+JOIN historical_nav h ON s.id = h.scheme_id
+WHERE h.nav_date >= CURRENT_DATE - INTERVAL '2 years'
+GROUP BY s.id, s.scheme_name, s.amfi_broad, s.amfi_sub
+HAVING COUNT(h.nav_date) >= 400  -- Ensure sufficient data points
+ORDER BY coefficient_of_variation DESC
+LIMIT 15;
 ```
 
----
-
-### **Table 4: `historical_nav_data`**
-
-**Purpose:** Historical NAV data stored in JSONB array format for time-series analysis
-
-**Row Count:** Variable (1 record per scheme with NAV history)  
-**Primary Key:** `id`  
-**Foreign Keys:** `scheme_id` → `schemes.id`  
-
-| Column Name | Data Type | Max Length | Nullable | Default | Constraints | Description | Sample Values |
-|-------------|-----------|------------|----------|---------|-------------|-------------|---------------|
-| `id` | SERIAL | - | NOT NULL | AUTO_INCREMENT | PRIMARY KEY | Auto-incrementing unique identifier | 1, 2, 3... |
-| `scheme_id` | VARCHAR | 50 | NOT NULL | - | FOREIGN KEY, UNIQUE | References schemes.id (one record per scheme) | 'sch_01JWVNGBX9CQGF2SG93J4EQFV0' |
-| `scheme_code` | VARCHAR | 20 | NOT NULL | - | - | Scheme code for easy reference and validation | '105823', '149140', '140328' |
-| `nav_history` | JSONB | Variable | NOT NULL | - | - | Array of date-wise NAV records in JSON format | `[{"date": "2024-01-01", "nav": 123.45}, {"date": "2024-01-02", "nav": 124.12}]` |
-| `data_start_date` | DATE | - | YES | NULL | - | Earliest date in the NAV history array | '2020-01-01', '2018-06-15' |
-| `data_end_date` | DATE | - | YES | NULL | - | Latest date in the NAV history array | '2024-12-31', '2024-08-30' |
-| `total_records` | INTEGER | - | YES | 0 | CHECK (total_records >= 0) | Count of NAV records in the history array | 1250, 2100, 890 |
-| `last_updated` | TIMESTAMP | - | YES | CURRENT_TIMESTAMP | - | When this record was last updated | '2025-08-30 09:41:14' |
-| `created_at` | TIMESTAMP | - | NO | CURRENT_TIMESTAMP | - | Record creation timestamp | '2025-08-30 09:41:14' |
-
-**JSONB Structure for `nav_history`:**
-```json
-[
-  {
-    "date": "2024-01-01",
-    "nav": 123.4567,
-    "source": "api"
-  },
-  {
-    "date": "2024-01-02", 
-    "nav": 124.1234,
-    "source": "api"
-  }
-]
-```
-
-**Indexes:**
+**3. "Show NAV growth trajectory for top 5 large cap funds over last 5 years"**
 ```sql
-CREATE INDEX idx_historical_nav_scheme_id ON historical_nav_data(scheme_id);
-CREATE INDEX idx_historical_nav_scheme_code ON historical_nav_data(scheme_code);
-CREATE INDEX idx_historical_nav_date_range ON historical_nav_data(data_start_date, data_end_date);
-CREATE INDEX idx_historical_nav_updated ON historical_nav_data(last_updated);
-CREATE INDEX idx_historical_nav_history_gin ON historical_nav_data USING GIN (nav_history);
-```
-
-**Constraints:**
-```sql
-FOREIGN KEY (scheme_id) REFERENCES schemes(id) ON DELETE CASCADE;
-UNIQUE (scheme_id);
-```
-
----
-
-### **View 4: `historical_nav_summary`**
-
-**Purpose:** Summary view of historical NAV data with key statistics and date ranges
-
-**Based On:** JOIN between `historical_nav_data` and `schemes` tables
-
-| Column Name | Data Type | Description | Sample Values |
-|-------------|-----------|-------------|---------------|
-| `scheme_id` | VARCHAR(50) | Scheme unique identifier | 'sch_01JWVNGBX9CQGF2SG93J4EQFV0' |
-| `scheme_code` | VARCHAR(20) | Numerical scheme code | '105823', '149140' |
-| `scheme_name` | TEXT | Full scheme name | 'LIC MF Banking & PSU Fund Growth' |
-| `amc_code` | VARCHAR(50) | Asset Management Company | 'LICMUTUALFUND_MF' |
-| `amfi_broad` | VARCHAR(50) | Broad fund category | 'Equity', 'Debt', 'Hybrid' |
-| `amfi_sub` | VARCHAR(100) | Sub-category classification | 'Banking and PSU Fund', 'Large Cap' |
-| `data_start_date` | DATE | Earliest NAV date available | '2020-01-01', '2018-06-15' |
-| `data_end_date` | DATE | Latest NAV date available | '2024-12-31', '2024-08-30' |
-| `total_records` | INTEGER | Number of NAV records | 1250, 2100, 890 |
-| `last_updated` | TIMESTAMP | Last data update timestamp | '2025-08-30 09:41:14' |
-| `current_nav` | DECIMAL(15,6) | Current NAV from schemes table | 34.931800 |
-| `aum_in_lakhs` | DECIMAL(20,2) | Assets Under Management | 196049.80 |
-| `history_span_days` | INTEGER | Date range span in days | 1825, 2190, 1095 |
-| `latest_historical_nav` | DECIMAL(15,6) | Latest NAV from history array | 34.931800 |
-| `oldest_historical_nav` | DECIMAL(15,6) | Oldest NAV from history array | 28.456700 |
-
-**SQL Definition:**
-```sql
-CREATE OR REPLACE VIEW historical_nav_summary AS
+WITH top_large_cap AS (
+    SELECT s.id, s.scheme_name, s.aum_in_lakhs
+    FROM schemes s
+    WHERE s.amfi_sub = 'Large Cap Fund'
+    ORDER BY s.aum_in_lakhs DESC
+    LIMIT 5
+),
+monthly_nav AS (
+    SELECT 
+        h.scheme_id,
+        DATE_TRUNC('month', h.nav_date) as month_year,
+        AVG(h.nav_value) as avg_monthly_nav,
+        MIN(h.nav_value) as min_monthly_nav,
+        MAX(h.nav_value) as max_monthly_nav
+    FROM historical_nav h
+    JOIN top_large_cap t ON h.scheme_id = t.id
+    WHERE h.nav_date >= CURRENT_DATE - INTERVAL '5 years'
+    GROUP BY h.scheme_id, DATE_TRUNC('month', h.nav_date)
+)
 SELECT 
-    h.scheme_id,
-    h.scheme_code,
     s.scheme_name,
-    s.amc_code,
+    m.month_year,
+    ROUND(m.avg_monthly_nav, 4) as avg_nav,
+    ROUND(m.min_monthly_nav, 4) as min_nav,
+    ROUND(m.max_monthly_nav, 4) as max_nav,
+    ROUND(((m.max_monthly_nav - m.min_monthly_nav) / m.avg_monthly_nav * 100), 2) as monthly_volatility_pct
+FROM monthly_nav m
+JOIN schemes s ON m.scheme_id = s.id
+ORDER BY s.scheme_name, m.month_year;
+```
+
+**4. "Identify funds that have consistently grown NAV (no negative months) in last 3 years"**
+```sql
+WITH monthly_returns AS (
+    SELECT 
+        h.scheme_id,
+        DATE_TRUNC('month', h.nav_date) as month_year,
+        FIRST_VALUE(h.nav_value) OVER (
+            PARTITION BY h.scheme_id, DATE_TRUNC('month', h.nav_date) 
+            ORDER BY h.nav_date
+        ) as month_start_nav,
+        LAST_VALUE(h.nav_value) OVER (
+            PARTITION BY h.scheme_id, DATE_TRUNC('month', h.nav_date) 
+            ORDER BY h.nav_date 
+            RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ) as month_end_nav
+    FROM historical_nav h
+    WHERE h.nav_date >= CURRENT_DATE - INTERVAL '3 years'
+),
+monthly_performance AS (
+    SELECT DISTINCT
+        scheme_id,
+        month_year,
+        ((month_end_nav - month_start_nav) / month_start_nav * 100) as monthly_return_pct
+    FROM monthly_returns
+),
+consistent_performers AS (
+    SELECT 
+        scheme_id,
+        COUNT(*) as total_months,
+        SUM(CASE WHEN monthly_return_pct >= 0 THEN 1 ELSE 0 END) as positive_months,
+        ROUND(AVG(monthly_return_pct), 2) as avg_monthly_return
+    FROM monthly_performance
+    GROUP BY scheme_id
+    HAVING COUNT(*) >= 30  -- At least 30 months of data
+        AND SUM(CASE WHEN monthly_return_pct >= 0 THEN 1 ELSE 0 END) = COUNT(*)  -- All positive
+)
+SELECT 
+    s.scheme_name,
     s.amfi_broad,
     s.amfi_sub,
-    h.data_start_date,
-    h.data_end_date,
-    h.total_records,
-    h.last_updated,
-    s.current_nav,
-    s.aum_in_lakhs,
-    (h.data_end_date - h.data_start_date) as history_span_days,
-    (h.nav_history->-1->>'nav')::DECIMAL(15,6) as latest_historical_nav,
-    (h.nav_history->0->>'nav')::DECIMAL(15,6) as oldest_historical_nav
-FROM historical_nav_data h
-JOIN schemes s ON h.scheme_id = s.id
-ORDER BY h.total_records DESC;
+    cp.total_months,
+    cp.avg_monthly_return,
+    ROUND((POWER(1 + cp.avg_monthly_return/100, 12) - 1) * 100, 2) as annualized_return_pct
+FROM consistent_performers cp
+JOIN schemes s ON cp.scheme_id = s.id
+ORDER BY cp.avg_monthly_return DESC;
 ```
 
----
-
-## 🔧 **Utility Functions**
-
-### **Function 1: `get_nav_for_date(scheme_id, date)`**
-**Purpose:** Retrieve NAV value for a specific scheme on a specific date
-**Returns:** DECIMAL(15,6) - NAV value or NULL if not found
-
-**Usage:**
+**5. "Compare NAV performance during market crash periods (identify resilient funds)"**
 ```sql
-SELECT get_nav_for_date('sch_01JWVNGBX9CQGF2SG93J4EQFV0', '2024-01-15');
+-- Define market crash periods (major corrections)
+WITH crash_periods AS (
+    SELECT '2020-02-01'::date as start_date, '2020-04-30'::date as end_date, 'COVID-19 Crash' as period_name
+    UNION ALL
+    SELECT '2018-01-01'::date, '2018-12-31'::date, '2018 Market Correction'
+    UNION ALL
+    SELECT '2015-08-01'::date, '2016-02-29'::date, '2015-16 Slowdown'
+),
+crash_performance AS (
+    SELECT 
+        h.scheme_id,
+        cp.period_name,
+        FIRST_VALUE(h.nav_value) OVER (
+            PARTITION BY h.scheme_id, cp.period_name 
+            ORDER BY h.nav_date
+        ) as start_nav,
+        LAST_VALUE(h.nav_value) OVER (
+            PARTITION BY h.scheme_id, cp.period_name 
+            ORDER BY h.nav_date 
+            RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ) as end_nav
+    FROM historical_nav h
+    CROSS JOIN crash_periods cp
+    WHERE h.nav_date BETWEEN cp.start_date AND cp.end_date
+),
+crash_returns AS (
+    SELECT DISTINCT
+        scheme_id,
+        period_name,
+        ((end_nav - start_nav) / start_nav * 100) as crash_return_pct
+    FROM crash_performance
+),
+resilient_funds AS (
+    SELECT 
+        scheme_id,
+        COUNT(*) as crash_periods_covered,
+        ROUND(AVG(crash_return_pct), 2) as avg_crash_return,
+        MIN(crash_return_pct) as worst_crash_return
+    FROM crash_returns
+    GROUP BY scheme_id
+    HAVING COUNT(*) >= 2  -- Covered at least 2 crash periods
+        AND AVG(crash_return_pct) > -15  -- Average loss less than 15%
+)
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    rf.crash_periods_covered,
+    rf.avg_crash_return,
+    rf.worst_crash_return,
+    s.aum_in_lakhs
+FROM resilient_funds rf
+JOIN schemes s ON rf.scheme_id = s.id
+ORDER BY rf.avg_crash_return DESC;
 ```
 
-### **Function 2: `get_nav_history_range(scheme_id, start_date, end_date)`**
-**Purpose:** Get NAV history for a scheme within a date range
-**Returns:** TABLE(nav_date DATE, nav_value DECIMAL(15,6))
-
-**Usage:**
+**6. "Calculate rolling 252-day (1-year) Sharpe ratio for funds using daily NAV data"**
 ```sql
-SELECT * FROM get_nav_history_range('sch_01JWVNGBX9CQGF2SG93J4EQFV0', '2024-01-01', '2024-01-31');
+WITH daily_returns AS (
+    SELECT 
+        h.scheme_id,
+        h.nav_date,
+        h.nav_value,
+        LAG(h.nav_value) OVER (PARTITION BY h.scheme_id ORDER BY h.nav_date) as prev_nav,
+        ((h.nav_value - LAG(h.nav_value) OVER (PARTITION BY h.scheme_id ORDER BY h.nav_date)) 
+         / LAG(h.nav_value) OVER (PARTITION BY h.scheme_id ORDER BY h.nav_date) * 100) as daily_return_pct
+    FROM historical_nav h
+    WHERE h.nav_date >= CURRENT_DATE - INTERVAL '2 years'
+),
+rolling_metrics AS (
+    SELECT 
+        scheme_id,
+        nav_date,
+        AVG(daily_return_pct) OVER (
+            PARTITION BY scheme_id 
+            ORDER BY nav_date 
+            ROWS BETWEEN 251 PRECEDING AND CURRENT ROW
+        ) as rolling_avg_return,
+        STDDEV(daily_return_pct) OVER (
+            PARTITION BY scheme_id 
+            ORDER BY nav_date 
+            ROWS BETWEEN 251 PRECEDING AND CURRENT ROW
+        ) as rolling_volatility,
+        COUNT(*) OVER (
+            PARTITION BY scheme_id 
+            ORDER BY nav_date 
+            ROWS BETWEEN 251 PRECEDING AND CURRENT ROW
+        ) as data_points
+    FROM daily_returns
+    WHERE daily_return_pct IS NOT NULL
+),
+latest_sharpe AS (
+    SELECT DISTINCT ON (scheme_id)
+        scheme_id,
+        nav_date,
+        rolling_avg_return * 252 as annualized_return,  -- Assuming 252 trading days
+        rolling_volatility * SQRT(252) as annualized_volatility,
+        CASE 
+            WHEN rolling_volatility > 0 THEN 
+                (rolling_avg_return * 252 - 6) / (rolling_volatility * SQRT(252))  -- Assuming 6% risk-free rate
+            ELSE NULL 
+        END as rolling_sharpe_ratio
+    FROM rolling_metrics
+    WHERE data_points = 252  -- Full year of data
+    ORDER BY scheme_id, nav_date DESC
+)
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    ls.nav_date as calculation_date,
+    ROUND(ls.annualized_return, 2) as annualized_return_pct,
+    ROUND(ls.annualized_volatility, 2) as annualized_volatility_pct,
+    ROUND(ls.rolling_sharpe_ratio, 3) as rolling_sharpe_ratio
+FROM latest_sharpe ls
+JOIN schemes s ON ls.scheme_id = s.id
+WHERE ls.rolling_sharpe_ratio IS NOT NULL
+ORDER BY ls.rolling_sharpe_ratio DESC
+LIMIT 25;
 ```
 
-### **Function 3: `calculate_nav_return(scheme_id, start_date, end_date)`**
-**Purpose:** Calculate return percentage between two dates
-**Returns:** DECIMAL(8,4) - Return percentage
+---
 
-**Usage:**
+## Advanced Time-Series Analysis Queries
+
+### Portfolio Performance Tracking
 ```sql
-SELECT calculate_nav_return('sch_01JWVNGBX9CQGF2SG93J4EQFV0', '2024-01-01', '2024-12-31');
+-- Track a hypothetical SIP investment over time
+WITH sip_simulation AS (
+    SELECT 
+        h.scheme_id,
+        h.nav_date,
+        h.nav_value,
+        1000 as monthly_sip_amount,  -- ₹1000 monthly SIP
+        CASE 
+            WHEN EXTRACT(day FROM h.nav_date) = 1 THEN 1000 / h.nav_value 
+            ELSE 0 
+        END as units_purchased
+    FROM historical_nav h
+    WHERE h.nav_date >= '2020-01-01'
+        AND EXTRACT(day FROM h.nav_date) = 1  -- First day of month
+),
+cumulative_investment AS (
+    SELECT 
+        scheme_id,
+        nav_date,
+        nav_value,
+        SUM(monthly_sip_amount) OVER (PARTITION BY scheme_id ORDER BY nav_date) as total_invested,
+        SUM(units_purchased) OVER (PARTITION BY scheme_id ORDER BY nav_date) as total_units
+    FROM sip_simulation
+)
+SELECT 
+    s.scheme_name,
+    ci.nav_date,
+    ci.total_invested,
+    ROUND(ci.total_units, 4) as total_units,
+    ROUND(ci.total_units * ci.nav_value, 2) as current_value,
+    ROUND(((ci.total_units * ci.nav_value - ci.total_invested) / ci.total_invested * 100), 2) as returns_pct
+FROM cumulative_investment ci
+JOIN schemes s ON ci.scheme_id = s.id
+WHERE s.amfi_sub = 'Large Cap Fund'
+ORDER BY s.scheme_name, ci.nav_date;
 ```
 
----
-
-## 🔗 **Relationships and Foreign Keys**
-
-### **Database Relationships:**
-```
-schemes (1) ←→ (N) bse_details
-  id ←→ scheme_id
-
-schemes (1) ←→ (N) returns_history  
-  id ←→ scheme_id
-
-schemes (1) ←→ (1) historical_nav_data
-  id ←→ scheme_id
-```
-
-### **Referential Integrity:**
-- All foreign key relationships enforced with `CASCADE DELETE`
-- Orphaned records automatically cleaned up when parent scheme is deleted
-- Composite unique constraints prevent duplicate return data for same scheme/period/date
-
----
-
-## 📋 **Data Quality Constraints**
-
-### **Data Validation Rules:**
-- `scheme_code` must be unique across all schemes
-- `risk_level` must be between 1 and 5 (if specified)
-- `return_value` can be negative (losses) or positive (gains)
-- All monetary values use DECIMAL for precision
-- `aum_in_lakhs` must be non-negative
-- `current_nav` must be positive (if specified)
-- Text fields are cleaned and limited to prevent overflow
-
-### **JSONB Field Validation:**
-- `returns_data` contains structured return periods as key-value pairs
-- `sharpe_ratios` contains risk-adjusted return metrics
-- `nav_history` contains array of historical NAV data points
-- All JSONB fields are optional and can be NULL
-
----
-
-## 🚀 **Performance Optimizations**
-
-### **Indexing Strategy:**
-- **Primary Keys:** Automatic B-tree indexes for fast lookups
-- **Foreign Keys:** B-tree indexes for efficient JOIN operations  
-- **Search Fields:** Indexes on frequently queried columns (amfi_broad, amc_code)
-- **Sorting Fields:** Descending indexes for AUM and NAV sorting
-- **Composite Indexes:** Multi-column indexes for complex queries
-
-### **Query Performance:**
-- Views pre-aggregate common analytical queries
-- JSONB indexes can be added for specific JSON path queries
-- Statistics updated regularly for optimal query planning
-- Batch operations used for data imports
-
----
-
-## 📊 **Data Distribution Statistics**
-
-### **Schemes by Category:**
-1. **Equity:** 512 schemes (34.4%) - ₹33,36,10,74L AUM
-2. **Other:** 440 schemes (29.5%) - Mixed categories
-3. **Debt:** 326 schemes (22.0%) - Fixed income funds  
-4. **Hybrid:** 169 schemes (11.4%) - Mixed asset allocation
-5. **Solution Oriented:** 41 schemes (2.7%) - Specialized funds
-
-### **Returns Data Coverage:**
-- **1-day returns:** Available for most active schemes
-- **1-year returns:** Available for 80%+ schemes
-- **3-year returns:** Available for 70%+ schemes  
-- **5-year returns:** Available for 60%+ schemes
-- **10-year returns:** Available for 40%+ schemes
-
-### **BSE Trading Options:**
-- **Average BSE options per scheme:** 1.9
-- **SIP enabled schemes:** 85%+ of total schemes
-- **Purchase enabled schemes:** 90%+ of total schemes
-- **Lock-in period schemes:** 15% (mainly ELSS funds)
-
----
-
-## 🔍 **API Integration Details**
-
-### **Data Source:**
-```
-API Endpoint: https://apis.mfapis.in/api/v1/scheme/list/all
-Method: GET
-Response Format: JSON
-Update Frequency: Real-time (on-demand)
-Rate Limits: Standard API limits apply
-```
-
-### **Data Processing:**
-- Automatic text cleaning for database compatibility
-- Safe type conversion with error handling
-- JSONB storage for flexible nested data
-- Batch processing for optimal performance
-- Comprehensive error logging and recovery
-
----
-
-## 🛠️ **Usage Examples**
-
-### **Connection String:**
-```bash
-psql -h localhost -U username -d mutual_fund_db
-```
-
-### **Common Queries:**
-
-**1. Top performing equity funds:**
+### Market Correlation Analysis
 ```sql
-SELECT * FROM top_performers 
-WHERE amfi_broad = 'Equity' 
-ORDER BY return_1y DESC 
-LIMIT 10;
-```
-
-**2. Schemes with highest AUM:**
-```sql
-SELECT scheme_name, amc_code, aum_in_lakhs, current_nav 
-FROM schemes 
-WHERE aum_in_lakhs IS NOT NULL 
-ORDER BY aum_in_lakhs DESC 
-LIMIT 10;
-```
-
-**3. Category-wise performance summary:**
-```sql
-SELECT * FROM category_performance 
-ORDER BY scheme_count DESC;
-```
-
-**4. SIP-enabled schemes with low minimum amounts:**
-```sql
-SELECT s.scheme_name, s.amc_code, b.sip_min_amount 
-FROM schemes s 
-JOIN bse_details b ON s.id = b.scheme_id 
-WHERE s.sip_allowed = true 
-AND b.sip_min_amount <= 500 
-ORDER BY b.sip_min_amount;
-```
-
-**5. JSONB queries for returns data:**
-```sql
-SELECT scheme_name, 
-       returns_data->>'1y' as return_1y,
-       returns_data->>'3y' as return_3y
-FROM schemes 
-WHERE returns_data IS NOT NULL 
-AND (returns_data->>'1y')::numeric > 15;
+-- Calculate correlation between funds and market index
+WITH nifty_proxy AS (
+    SELECT nav_date, nav_value as nifty_nav
+    FROM historical_nav h
+    JOIN schemes s ON h.scheme_id = s.id
+    WHERE s.scheme_name ILIKE '%nifty 50%index%'
+    LIMIT 1
+),
+fund_returns AS (
+    SELECT 
+        h.scheme_id,
+        h.nav_date,
+        ((h.nav_value - LAG(h.nav_value) OVER (PARTITION BY h.scheme_id ORDER BY h.nav_date)) 
+         / LAG(h.nav_value) OVER (PARTITION BY h.scheme_id ORDER BY h.nav_date)) as fund_return,
+        ((n.nifty_nav - LAG(n.nifty_nav) OVER (ORDER BY h.nav_date)) 
+         / LAG(n.nifty_nav) OVER (ORDER BY h.nav_date)) as nifty_return
+    FROM historical_nav h
+    JOIN nifty_proxy n ON h.nav_date = n.nav_date
+    WHERE h.nav_date >= CURRENT_DATE - INTERVAL '1 year'
+)
+SELECT 
+    s.scheme_name,
+    s.amfi_sub,
+    COUNT(*) as data_points,
+    ROUND(CORR(fr.fund_return, fr.nifty_return)::numeric, 3) as correlation_with_nifty,
+    ROUND(AVG(fr.fund_return * 100), 3) as avg_daily_return_pct,
+    ROUND(STDDEV(fr.fund_return * 100), 3) as daily_volatility_pct
+FROM fund_returns fr
+JOIN schemes s ON fr.scheme_id = s.id
+WHERE fr.fund_return IS NOT NULL AND fr.nifty_return IS NOT NULL
+GROUP BY s.id, s.scheme_name, s.amfi_sub
+HAVING COUNT(*) >= 200  -- Sufficient data points
+ORDER BY correlation_with_nifty DESC;
 ```
 
 ---
 
-## 🔧 **Maintenance and Updates**
-
-### **Data Refresh:**
-- Run `setup_updated_mutual_fund_db.py` to refresh all data
-- Incremental updates possible by modifying the script
-- Automatic conflict resolution with UPSERT operations
-- Data validation and cleaning during import
-
-### **Schema Evolution:**
-- Add new columns with ALTER TABLE statements
-- JSONB fields provide flexibility for new API fields
-- Views can be updated without affecting base tables
-- Indexes can be added/modified based on query patterns
-
-### **Backup and Recovery:**
-```bash
-# Backup
-pg_dump -h localhost -U username mutual_fund_db > backup.sql
-
-# Restore  
-psql -h localhost -U username -d mutual_fund_db < backup.sql
-```
-
----
-
-**Last Updated:** June 2025  
-**Schema Version:** 1.0  
-**Compatible With:** PostgreSQL 12+  
-**API Version:** mfapis.in v1  
-**Maintenance:** Automated via setup scripts
+*Last Updated: September 11, 2025*
+*Total Records: 3,052,270 across 7 tables (including 3,037,708 historical NAV records)*
+*Data Sources: MF APIs Club (https://app.mfapis.club) + MFApi.in (https://api.mfapi.in)*
