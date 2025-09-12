@@ -2,15 +2,17 @@
 
 ## Overview
 
-The `mutual_fund` PostgreSQL database contains comprehensive mutual fund data from MF APIs Club with 6 interconnected tables storing 14,562+ records across 1,487 mutual fund schemes.
+The `mutual_fund` PostgreSQL database contains comprehensive mutual fund data from MF APIs Club with 8 interconnected tables storing 14,562+ records across 1,487 mutual fund schemes.
 
 ### Database Statistics
-- **Total Schemes**: 1,487
+- **Total Schemes**: 1,478
 - **Performance Records**: 1,486 
-- **Sharpe Ratios**: 267
 - **BSE Trading Details**: 2,889
 - **SIP Configurations**: 3,961
 - **Transaction Configs**: 5,778
+- **Historical NAV Records**: 3,037,708
+- **Historical Returns Records**: 3,036,230
+- **Historical Risk Records**: 4,155+ (includes Sharpe ratios, beta/alpha metrics)
 
 ### Data Source
 - **API**: https://app.mfapis.club/api/v1/scheme/list
@@ -23,8 +25,10 @@ The `mutual_fund` PostgreSQL database contains comprehensive mutual fund data fr
 
 ```
 schemes (1:1) ← scheme_returns
-schemes (1:1) ← sharpe_ratios  
 schemes (1:M) → bse_details
+schemes (1:M) → historical_nav
+schemes (1:M) → historical_returns
+schemes (1:M) → historical_risk
 bse_details (1:M) → sip_configurations
 bse_details (1:M) → transaction_configurations
 ```
@@ -186,88 +190,7 @@ ORDER BY avg_5yr DESC NULLS LAST;
 
 ---
 
-## 3. SHARPE_RATIOS Table
-
-**Purpose**: Risk-adjusted performance metrics
-
-| Column | Type | Description |
-|--------|------|-------------|
-| scheme_id | TEXT (PK, FK) | References schemes.id |
-| sharpe_3yr | DECIMAL(8,4) | 3-year Sharpe ratio |
-| sharpe_5yr | DECIMAL(8,4) | 5-year Sharpe ratio |
-| sharpe_10yr | DECIMAL(8,4) | 10-year Sharpe ratio |
-| created_at | TIMESTAMP | Record creation time |
-
-### Text-to-SQL Examples
-
-**1. "Find funds with best risk-adjusted returns (highest 5-year Sharpe ratio)"**
-```sql
-SELECT s.scheme_name, s.amfi_sub, s.risk_level,
-       sr.yrs5, sh.sharpe_5yr
-FROM schemes s
-JOIN scheme_returns sr ON s.id = sr.scheme_id
-JOIN sharpe_ratios sh ON s.id = sh.scheme_id
-WHERE sh.sharpe_5yr IS NOT NULL
-ORDER BY sh.sharpe_5yr DESC
-LIMIT 15;
-```
-
-**2. "Compare Sharpe ratios across different risk levels"**
-```sql
-SELECT s.risk_level,
-       COUNT(*) as fund_count,
-       ROUND(AVG(sh.sharpe_3yr), 3) as avg_sharpe_3yr,
-       ROUND(AVG(sh.sharpe_5yr), 3) as avg_sharpe_5yr,
-       ROUND(AVG(sr.yrs5), 2) as avg_return_5yr
-FROM schemes s
-JOIN sharpe_ratios sh ON s.id = sh.scheme_id
-JOIN scheme_returns sr ON s.id = sr.scheme_id
-WHERE sh.sharpe_5yr IS NOT NULL
-GROUP BY s.risk_level
-ORDER BY s.risk_level;
-```
-
-**3. "Find high-return funds with poor risk adjustment (low Sharpe ratio)"**
-```sql
-SELECT s.scheme_name, s.amfi_sub, sr.yrs5, sh.sharpe_5yr,
-       (sr.yrs5 / NULLIF(sh.sharpe_5yr, 0)) as return_to_sharpe_ratio
-FROM schemes s
-JOIN scheme_returns sr ON s.id = sr.scheme_id
-JOIN sharpe_ratios sh ON s.id = sh.scheme_id
-WHERE sr.yrs5 > 20 AND sh.sharpe_5yr < 0.8
-ORDER BY sr.yrs5 DESC;
-```
-
-**4. "Identify consistently good risk-adjusted performers across time periods"**
-```sql
-SELECT s.scheme_name, s.amfi_broad,
-       sh.sharpe_3yr, sh.sharpe_5yr, sh.sharpe_10yr
-FROM schemes s
-JOIN sharpe_ratios sh ON s.id = sh.scheme_id
-WHERE sh.sharpe_3yr > 0.8 
-    AND sh.sharpe_5yr > 0.8 
-    AND sh.sharpe_10yr > 0.5
-ORDER BY (sh.sharpe_3yr + sh.sharpe_5yr + sh.sharpe_10yr) DESC;
-```
-
-**5. "Show Sharpe ratio distribution by fund category"**
-```sql
-SELECT s.amfi_broad,
-       COUNT(*) as funds_with_sharpe,
-       MIN(sh.sharpe_5yr) as min_sharpe,
-       ROUND(AVG(sh.sharpe_5yr), 3) as avg_sharpe,
-       MAX(sh.sharpe_5yr) as max_sharpe,
-       ROUND(STDDEV(sh.sharpe_5yr), 3) as sharpe_volatility
-FROM schemes s
-JOIN sharpe_ratios sh ON s.id = sh.scheme_id
-WHERE sh.sharpe_5yr IS NOT NULL
-GROUP BY s.amfi_broad
-ORDER BY avg_sharpe DESC;
-```
-
----
-
-## 4. BSE_DETAILS Table
+## 3. BSE_DETAILS Table
 
 **Purpose**: BSE trading information and transaction capabilities
 
@@ -521,12 +444,12 @@ SELECT
     s.scheme_name,
     s.risk_level,
     sr.yrs5 as five_year_return,
-    sh.sharpe_5yr,
+    hr_sharpe.sharpe_ratio,
     sip.min_amount as min_sip,
     CASE WHEN b.exit_load_flag THEN 'Yes' ELSE 'No' END as exit_load
 FROM schemes s
 JOIN scheme_returns sr ON s.id = sr.scheme_id
-LEFT JOIN sharpe_ratios sh ON s.id = sh.scheme_id
+LEFT JOIN historical_risk hr_sharpe ON s.id = hr_sharpe.scheme_id AND hr_sharpe.lookback_period_days = 252
 JOIN bse_details b ON s.id = b.scheme_id
 JOIN sip_configurations sip ON b.id = sip.bse_detail_id
 WHERE s.sip_allowed = true 
@@ -546,13 +469,13 @@ SELECT
     s.aum_in_lakhs,
     s.risk_level,
     sr.yrs1, sr.yrs3, sr.yrs5,
-    sh.sharpe_5yr,
+    hr_sharpe.sharpe_ratio,
     sip.min_amount as min_sip,
     tc.fresh_min as min_lumpsum,
     b.exit_load_message
 FROM schemes s
 LEFT JOIN scheme_returns sr ON s.id = sr.scheme_id
-LEFT JOIN sharpe_ratios sh ON s.id = sh.scheme_id
+LEFT JOIN historical_risk hr_sharpe ON s.id = hr_sharpe.scheme_id AND hr_sharpe.lookback_period_days = 252
 LEFT JOIN bse_details b ON s.id = b.scheme_id
 LEFT JOIN sip_configurations sip ON b.id = sip.bse_detail_id AND sip.sip_type = 'regular'
 LEFT JOIN transaction_configurations tc ON b.id = tc.bse_detail_id AND tc.transaction_type = 'purchase'
@@ -583,6 +506,770 @@ pg_dump mutual_fund > mutual_fund_backup_$(date +%Y%m%d).sql
 ---
 
 ## 7. HISTORICAL_NAV Table
+
+**Purpose**: Complete historical Net Asset Value data for all mutual fund schemes
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | SERIAL (PK) | Auto-increment primary key |
+| scheme_id | TEXT (FK) | References schemes.id |
+| scheme_code | TEXT | AMFI scheme code for reference |
+| nav_date | DATE | Date of NAV record |
+| nav_value | DECIMAL(12,6) | Net Asset Value on the date |
+| data_source | TEXT | Data source ('mfapi') |
+| created_at | TIMESTAMP | Record creation time |
+| updated_at | TIMESTAMP | Last update time |
+
+**Indexes**: Optimized for date-range queries and scheme lookups
+- `idx_historical_nav_scheme_date` (scheme_id, nav_date DESC)
+- `idx_historical_nav_date` (nav_date DESC)
+- `idx_historical_nav_scheme_code` (scheme_code)
+
+**Data Coverage**: 3,037,708 records spanning April 1, 2006 to September 10, 2025
+
+---
+
+## 8. HISTORICAL_RETURNS Table
+
+**Purpose**: Comprehensive daily returns and rolling returns analysis for all mutual fund schemes
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | SERIAL (PK) | Auto-increment primary key |
+| scheme_id | TEXT (FK) | References schemes.id |
+| scheme_code | TEXT | AMFI scheme code for reference |
+| nav_date | DATE | Date of the return calculation |
+| nav_value | DECIMAL(12,6) | Net Asset Value on the date |
+| daily_return | DECIMAL(10,6) | Daily return percentage: (NAV_current / NAV_previous - 1) * 100 |
+| log_return | DECIMAL(10,6) | Natural logarithm of (daily_return + 1) for risk calculations |
+| rolling_return_1y | DECIMAL(10,4) | 1-year rolling return (252 trading days lookback) |
+| rolling_return_3y | DECIMAL(10,4) | 3-year rolling return (756 trading days lookback) |
+| rolling_return_5y | DECIMAL(10,4) | 5-year rolling return (1260 trading days lookback) |
+| data_source | TEXT | Data source ('mfapi') |
+| created_at | TIMESTAMP | Record creation time |
+| updated_at | TIMESTAMP | Last update time |
+
+**Indexes**: Optimized for performance analysis and time-series queries
+- `idx_historical_returns_scheme_date` (scheme_id, nav_date DESC)
+- `idx_historical_returns_date` (nav_date DESC)
+- `idx_historical_returns_scheme_code` (scheme_code)
+- `idx_historical_returns_rolling_1y` (rolling_return_1y DESC) WHERE rolling_return_1y IS NOT NULL
+- `idx_historical_returns_rolling_3y` (rolling_return_3y DESC) WHERE rolling_return_3y IS NOT NULL
+- `idx_historical_returns_rolling_5y` (rolling_return_5y DESC) WHERE rolling_return_5y IS NOT NULL
+
+**Data Coverage**: 3,036,230 total records with comprehensive coverage:
+- **Total Schemes**: 1,478
+- **Records with 1Y Rolling**: 2,678,486 (88.22% coverage)
+- **Records with 3Y Rolling**: 2,101,273 (69.21% coverage)
+- **Records with 5Y Rolling**: 1,677,884 (55.26% coverage)
+- **Table Size**: 1,688 MB
+- **Date Range**: April 2, 2006 to September 10, 2025
+
+**Performance Statistics**:
+- Average daily return: 0.1480%
+- Daily volatility: 31.72%
+- Value range: -99.99% to 9921.58% (with extreme outlier handling)
+
+**Category-wise Coverage**:
+- **Equity**: 508 schemes → 1Y: 455, 3Y: 336, 5Y: 273 schemes
+- **Debt**: 324 schemes → 1Y: 314, 3Y: 284, 5Y: 253 schemes  
+- **Other**: 437 schemes → 1Y: 333, 3Y: 176, 5Y: 84 schemes
+- **Hybrid**: 168 schemes → 1Y: 157, 3Y: 124, 5Y: 106 schemes
+- **Solution Oriented**: 41 schemes → 1Y: 40, 3Y: 35, 5Y: 30 schemes
+
+### Text-to-SQL Examples
+
+**1. "Find top performing equity funds based on 1-year rolling returns"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_sub,
+    hr.nav_date,
+    hr.rolling_return_1y,
+    hr.nav_value,
+    s.aum_in_lakhs
+FROM historical_returns hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE s.amfi_broad = 'Equity'
+    AND hr.rolling_return_1y IS NOT NULL
+    AND hr.nav_date = (
+        SELECT MAX(nav_date) 
+        FROM historical_returns hr2 
+        WHERE hr2.scheme_id = hr.scheme_id 
+        AND hr2.rolling_return_1y IS NOT NULL
+    )
+ORDER BY hr.rolling_return_1y DESC
+LIMIT 20;
+```
+
+**2. "Show funds with consistent performance across all rolling return periods"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    hr.rolling_return_1y,
+    hr.rolling_return_3y,
+    hr.rolling_return_5y,
+    hr.nav_date as latest_date,
+    s.aum_in_lakhs
+FROM historical_returns hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.rolling_return_1y IS NOT NULL
+    AND hr.rolling_return_3y IS NOT NULL
+    AND hr.rolling_return_5y IS NOT NULL
+    AND hr.rolling_return_1y > 15
+    AND hr.rolling_return_3y > 45
+    AND hr.rolling_return_5y > 75
+    AND hr.nav_date = (
+        SELECT MAX(nav_date) 
+        FROM historical_returns hr2 
+        WHERE hr2.scheme_id = hr.scheme_id 
+        AND hr2.rolling_return_5y IS NOT NULL
+    )
+ORDER BY (hr.rolling_return_1y + hr.rolling_return_3y + hr.rolling_return_5y) DESC;
+```
+
+**3. "Find funds with lowest volatility based on daily returns over last 2 years"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    COUNT(hr.daily_return) as data_points,
+    ROUND(AVG(hr.daily_return), 4) as avg_daily_return,
+    ROUND(STDDEV(hr.daily_return), 4) as daily_volatility,
+    ROUND(AVG(hr.daily_return) * 252, 2) as annualized_return,
+    ROUND(STDDEV(hr.daily_return) * SQRT(252), 2) as annualized_volatility
+FROM historical_returns hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.nav_date >= CURRENT_DATE - INTERVAL '2 years'
+    AND hr.daily_return IS NOT NULL
+GROUP BY s.id, s.scheme_name, s.amfi_broad, s.amfi_sub
+HAVING COUNT(hr.daily_return) >= 400
+ORDER BY STDDEV(hr.daily_return)
+LIMIT 15;
+```
+
+**4. "Compare rolling returns performance across fund categories"**
+```sql
+SELECT 
+    s.amfi_broad,
+    COUNT(DISTINCT hr.scheme_id) as fund_count,
+    ROUND(AVG(hr.rolling_return_1y), 2) as avg_1y_rolling,
+    ROUND(AVG(hr.rolling_return_3y), 2) as avg_3y_rolling,
+    ROUND(AVG(hr.rolling_return_5y), 2) as avg_5y_rolling,
+    ROUND(STDDEV(hr.rolling_return_1y), 2) as volatility_1y,
+    ROUND(STDDEV(hr.rolling_return_3y), 2) as volatility_3y,
+    ROUND(STDDEV(hr.rolling_return_5y), 2) as volatility_5y
+FROM historical_returns hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.nav_date >= CURRENT_DATE - INTERVAL '1 year'
+GROUP BY s.amfi_broad
+ORDER BY avg_5y_rolling DESC NULLS LAST;
+```
+
+**5. "Identify funds with improving performance trend (3Y > 1Y rolling returns)"**
+```sql
+WITH latest_rolling AS (
+    SELECT DISTINCT ON (hr.scheme_id)
+        hr.scheme_id,
+        hr.rolling_return_1y,
+        hr.rolling_return_3y,
+        hr.rolling_return_5y,
+        hr.nav_date
+    FROM historical_returns hr
+    WHERE hr.rolling_return_1y IS NOT NULL 
+        AND hr.rolling_return_3y IS NOT NULL
+    ORDER BY hr.scheme_id, hr.nav_date DESC
+)
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    lr.rolling_return_1y,
+    lr.rolling_return_3y,
+    lr.rolling_return_5y,
+    ROUND((lr.rolling_return_3y - lr.rolling_return_1y), 2) as performance_improvement,
+    lr.nav_date as latest_date
+FROM latest_rolling lr
+JOIN schemes s ON lr.scheme_id = s.id
+WHERE lr.rolling_return_3y > lr.rolling_return_1y
+    AND lr.rolling_return_1y > 10  -- Minimum threshold
+ORDER BY performance_improvement DESC
+LIMIT 25;
+```
+
+**6. "Calculate Sharpe ratio using daily returns and rolling returns"**
+```sql
+WITH risk_metrics AS (
+    SELECT 
+        hr.scheme_id,
+        COUNT(hr.daily_return) as data_points,
+        AVG(hr.daily_return) as avg_daily_return,
+        STDDEV(hr.daily_return) as daily_volatility,
+        MAX(hr.rolling_return_1y) as latest_1y_rolling,
+        MAX(hr.rolling_return_3y) as latest_3y_rolling
+    FROM historical_returns hr
+    WHERE hr.nav_date >= CURRENT_DATE - INTERVAL '1 year'
+        AND hr.daily_return IS NOT NULL
+    GROUP BY hr.scheme_id
+    HAVING COUNT(hr.daily_return) >= 200
+)
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    rm.data_points,
+    ROUND(rm.avg_daily_return * 252, 2) as annualized_return,
+    ROUND(rm.daily_volatility * SQRT(252), 2) as annualized_volatility,
+    ROUND(rm.latest_1y_rolling, 2) as rolling_1y_return,
+    ROUND(rm.latest_3y_rolling, 2) as rolling_3y_return,
+    ROUND(
+        CASE 
+            WHEN rm.daily_volatility > 0 THEN 
+                (rm.avg_daily_return * 252 - 6) / (rm.daily_volatility * SQRT(252))
+            ELSE NULL 
+        END, 3
+    ) as calculated_sharpe_ratio
+FROM risk_metrics rm
+JOIN schemes s ON rm.scheme_id = s.id
+WHERE rm.daily_volatility > 0
+ORDER BY calculated_sharpe_ratio DESC NULLS LAST
+LIMIT 20;
+```
+
+**7. "Find funds that performed well during market downturns (negative daily returns)"**
+```sql
+WITH downturn_performance AS (
+    SELECT 
+        hr.scheme_id,
+        COUNT(CASE WHEN hr.daily_return < 0 THEN 1 END) as negative_days,
+        COUNT(hr.daily_return) as total_days,
+        AVG(CASE WHEN hr.daily_return < 0 THEN hr.daily_return END) as avg_negative_return,
+        AVG(hr.daily_return) as overall_avg_return,
+        MIN(hr.daily_return) as worst_single_day
+    FROM historical_returns hr
+    WHERE hr.nav_date >= CURRENT_DATE - INTERVAL '2 years'
+        AND hr.daily_return IS NOT NULL
+    GROUP BY hr.scheme_id
+    HAVING COUNT(hr.daily_return) >= 300
+)
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    dp.total_days,
+    dp.negative_days,
+    ROUND((dp.negative_days::float / dp.total_days * 100), 1) as negative_days_pct,
+    ROUND(dp.avg_negative_return, 4) as avg_loss_on_bad_days,
+    ROUND(dp.overall_avg_return, 4) as overall_avg_daily_return,
+    ROUND(dp.worst_single_day, 4) as worst_single_day_loss
+FROM downturn_performance dp
+JOIN schemes s ON dp.scheme_id = s.id
+WHERE dp.avg_negative_return > -2.0  -- Less than 2% average loss on bad days
+ORDER BY dp.avg_negative_return DESC
+LIMIT 20;
+```
+
+**8. "Track rolling returns evolution over time for specific fund categories"**
+```sql
+SELECT 
+    DATE_TRUNC('month', hr.nav_date) as month_year,
+    s.amfi_broad,
+    COUNT(DISTINCT hr.scheme_id) as funds_with_data,
+    ROUND(AVG(hr.rolling_return_1y), 2) as avg_1y_rolling,
+    ROUND(AVG(hr.rolling_return_3y), 2) as avg_3y_rolling,
+    ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY hr.rolling_return_1y), 2) as median_1y_rolling,
+    ROUND(PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY hr.rolling_return_1y), 2) as top_quartile_1y,
+    ROUND(PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY hr.rolling_return_1y), 2) as bottom_quartile_1y
+FROM historical_returns hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.nav_date >= CURRENT_DATE - INTERVAL '3 years'
+    AND hr.rolling_return_1y IS NOT NULL
+    AND s.amfi_broad IN ('Equity', 'Debt', 'Hybrid')
+    AND hr.maximum_drawdown IS NOT NULL
+    AND hr.annualized_volatility IS NOT NULL
+    AND hr.avg_daily_return * 252 > 8  -- Minimum 8% annualized return
+ORDER BY calmar_ratio DESC NULLS LAST
+LIMIT 25;
+```
+
+**10. "Find funds with lowest tail risk (best VaR 95%) by category"**
+```sql
+WITH ranked_var AS (
+    SELECT 
+        s.scheme_name,
+        s.amfi_broad,
+        s.amfi_sub,
+        hr.lookback_period_years,
+        ROUND(hr.var_95_1day * 100, 2) as var_95_percent,
+        ROUND(hr.annualized_volatility, 4) as volatility_percent,
+        ROUND(hr.maximum_drawdown, 2) as max_drawdown_percent,
+        ROW_NUMBER() OVER (PARTITION BY s.amfi_broad ORDER BY hr.var_95_1day DESC) as var_rank
+    FROM historical_risk hr
+    JOIN schemes s ON hr.scheme_id = s.id
+    WHERE hr.lookback_period_years = 1.00
+        AND hr.var_95_1day IS NOT NULL
+)
+SELECT 
+    scheme_name,
+    amfi_broad,
+    amfi_sub,
+    var_95_percent,
+    volatility_percent,
+    max_drawdown_percent
+FROM ranked_var
+WHERE var_rank <= 5
+ORDER BY amfi_broad, var_rank;
+```
+
+**11. "Analyze correlation between daily returns and rolling returns"**
+```sql
+WITH correlation_analysis AS (
+    SELECT 
+        hr.scheme_id,
+        COUNT(*) as data_points,
+        CORR(hr.daily_return, hr.rolling_return_1y) as daily_vs_1y_correlation,
+        CORR(hr.rolling_return_1y, hr.rolling_return_3y) as rolling_1y_vs_3y_correlation,
+        AVG(hr.daily_return) as avg_daily_return,
+        AVG(hr.rolling_return_1y) as avg_1y_rolling,
+        AVG(hr.rolling_return_3y) as avg_3y_rolling
+    FROM historical_returns hr
+    WHERE hr.nav_date >= CURRENT_DATE - INTERVAL '1 year'
+        AND hr.daily_return IS NOT NULL
+        AND hr.rolling_return_1y IS NOT NULL
+    GROUP BY hr.scheme_id
+    HAVING COUNT(*) >= 200
+)
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    ca.data_points,
+    ROUND(ca.daily_vs_1y_correlation::numeric, 3) as daily_vs_rolling_correlation,
+    ROUND(ca.rolling_1y_vs_3y_correlation::numeric, 3) as short_vs_long_rolling_correlation,
+    ROUND(ca.avg_daily_return * 252, 2) as annualized_daily_return,
+    ROUND(ca.avg_1y_rolling, 2) as avg_1y_rolling_return,
+    ROUND(ca.avg_3y_rolling, 2) as avg_3y_rolling_return
+FROM correlation_analysis ca
+JOIN schemes s ON ca.scheme_id = s.id
+ORDER BY ca.rolling_1y_vs_3y_correlation DESC NULLS LAST
+LIMIT 20;
+```
+
+---
+
+## 9. HISTORICAL_RISK Table
+
+**Purpose**: Comprehensive risk metrics and volatility analysis for mutual fund schemes
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | SERIAL (PK) | Auto-increment primary key |
+| scheme_id | TEXT (FK) | References schemes.id |
+| scheme_code | TEXT | AMFI scheme code for reference |
+| calculation_date | DATE | Date of risk calculation (latest available data date) |
+| lookback_period_days | INTEGER | Number of days used for calculation (252, 504, 756, 1260) |
+| lookback_period_years | DECIMAL(4,2) | Lookback period in years: calculated as lookback_period_days / 252 |
+| data_points | INTEGER | Actual number of data points used in calculation |
+| annualized_volatility | DECIMAL(10,6) | Annualized volatility: stddev(daily_returns) * sqrt(252) |
+| avg_daily_return | DECIMAL(10,6) | Average daily return over the lookback period |
+| min_daily_return | DECIMAL(10,6) | Minimum daily return in the period |
+| max_daily_return | DECIMAL(10,6) | Maximum daily return in the period |
+| maximum_drawdown | DECIMAL(10,6) | Maximum drawdown: worst peak-to-trough loss as negative percentage |
+| var_95_1day | DECIMAL(10,6) | 1-day 95% Value at Risk: 5th percentile of daily returns using historical simulation |
+| sharpe_ratio | DECIMAL(10,6) | Sharpe Ratio: (Portfolio Return - Risk-free Rate) / Standard Deviation of Returns |
+| sortino_ratio | DECIMAL(10,6) | Sortino Ratio: (Portfolio Return - Risk-free Rate) / Downside Deviation |
+| skewness | DECIMAL(10,6) | Skewness of daily returns distribution |
+| kurtosis | DECIMAL(10,6) | Kurtosis of daily returns distribution |
+| **beta** | **DECIMAL(10,6)** | **Category Beta: Correlation with peer group average (category benchmark)** |
+| **alpha** | **DECIMAL(10,6)** | **Category Alpha: Jensen's Alpha relative to category peer average** |
+| **information_ratio** | **DECIMAL(10,6)** | **Information Ratio: Alpha / Tracking Error relative to category benchmark** |
+| **benchmark_category** | **VARCHAR(50)** | **Category benchmark used (e.g., 'Equity_peer_average', 'Debt_peer_average')** |
+| **index_beta** | **DECIMAL(10,6)** | **Index Beta: Correlation with appropriate index fund proxy** |
+| **index_alpha** | **DECIMAL(10,6)** | **Index Alpha: Jensen's Alpha relative to index fund proxy** |
+| **index_benchmark** | **VARCHAR(100)** | **Index fund proxy used as benchmark (e.g., 'Axis Nifty 100 Index Fund - Growth')** |
+| data_source | TEXT | Data source ('calculated') |
+| created_at | TIMESTAMP | Record creation time |
+| updated_at | TIMESTAMP | Last update time |
+
+**Indexes**: Optimized for risk analysis and volatility queries
+- `idx_historical_risk_scheme_id` (scheme_id)
+- `idx_historical_risk_calculation_date` (calculation_date DESC)
+- `idx_historical_risk_scheme_date` (scheme_id, calculation_date DESC)
+- `idx_historical_risk_volatility` (annualized_volatility DESC) WHERE annualized_volatility IS NOT NULL
+- `idx_historical_risk_max_drawdown` (maximum_drawdown DESC) WHERE maximum_drawdown IS NOT NULL
+- `idx_historical_risk_var_95` (var_95_1day) WHERE var_95_1day IS NOT NULL
+- `idx_historical_risk_sharpe_ratio` (sharpe_ratio DESC) WHERE sharpe_ratio IS NOT NULL
+- `idx_historical_risk_sortino_ratio` (sortino_ratio DESC) WHERE sortino_ratio IS NOT NULL
+- `idx_historical_risk_lookback` (lookback_period_days)
+- `idx_historical_risk_lookback_years` (lookback_period_years)
+- **`idx_historical_risk_beta` (beta DESC) WHERE beta IS NOT NULL**
+- **`idx_historical_risk_alpha` (alpha DESC) WHERE alpha IS NOT NULL**
+- **`idx_historical_risk_information_ratio` (information_ratio DESC) WHERE information_ratio IS NOT NULL**
+- **`idx_historical_risk_benchmark_category` (benchmark_category)**
+- **`idx_historical_risk_index_beta` (index_beta DESC) WHERE index_beta IS NOT NULL**
+- **`idx_historical_risk_index_alpha` (index_alpha DESC) WHERE index_alpha IS NOT NULL**
+- **`idx_historical_risk_index_benchmark` (index_benchmark)**
+
+**Data Coverage**: 4,155+ total records with comprehensive risk metrics:
+- **Total Schemes**: 1,300+ schemes with risk data
+- **Lookback Periods**: 4 periods (1Y, 2Y, 3Y, 5Y)
+- **Date Range**: September 9-10, 2025
+- **Records with Volatility**: 4,155 (100% coverage)
+- **Volatility Range**: 0.0005% to 4.0255%
+- **Records with Category Beta/Alpha**: 1,379+ (category-relative performance metrics)
+- **Records with Index Beta/Alpha**: 1,379+ (index-relative performance metrics)
+
+**Risk Statistics by Category (1Y Period)**:
+- **Equity**: Avg volatility 0.1553%, Avg max drawdown -18.54%, 455 schemes
+- **Debt**: Avg volatility 0.0119%, Avg max drawdown -0.94%, 314 schemes
+- **Hybrid**: Avg volatility 0.0641%, Avg max drawdown -6.70%, 157 schemes
+- **Other**: Avg volatility 0.1191%, Avg max drawdown -11.81%, 334 schemes
+- **Solution Oriented**: Avg volatility 0.0987%, Avg max drawdown -11.66%, 40 schemes
+
+**Maximum Drawdown Statistics**:
+- **Records with Drawdown**: 4,155 (100% coverage)
+- **Average Maximum Drawdown**: -18.26%
+- **Worst Maximum Drawdown**: -83.04% (JM Value Fund - 5Y period)
+- **Drawdown Range by Period**: 1Y: -0.94% to -18.54%, 5Y: -3.44% to -46.67%
+
+**Value at Risk (VaR) 95% Statistics**:
+- **Records with VaR**: 4,155 (100% coverage)
+- **Method**: Historical Simulation (Non-parametric)
+- **Average VaR by Period**: 1Y: -1.07%, 2Y: -0.94%, 3Y: -0.87%, 5Y: -0.81%
+- **Worst VaR**: -3.87% (Edelweiss US Technology Equity Fund - 1Y period)
+- **VaR Range by Period**: 1Y: -3.87% to 0.01%, 5Y: -3.01% to 0.01%
+
+**Sharpe & Sortino Ratio Statistics**:
+- **Records with Ratios**: 4,155 (100% coverage)
+- **Risk-free Rate**: 6% (Indian Government Bonds)
+- **Average Sharpe Ratio by Period**: 1Y: 0.167, 2Y: 0.537, 3Y: 0.802, 5Y: 0.250
+- **Best Sharpe Ratio**: 4.373 (Aditya Birla Sun Life Money Manager Fund - 1Y period)
+- **Best Sortino Ratio**: 10.000 (Multiple debt funds with minimal downside risk)
+
+**Category Beta/Alpha Statistics** (Peer Group Benchmarking):
+- **Records with Category Beta**: 1,379+ (relative to category peer averages)
+- **Records with Category Alpha**: 1,379+ (Jensen's Alpha vs peer group)
+- **Records with Information Ratio**: 1,379+ (Alpha / Tracking Error vs peers)
+- **Benchmark Categories**: Equity_peer_average, Debt_peer_average, Hybrid_peer_average, etc.
+- **Beta Range**: Typically -5.0 to +5.0 (capped for database stability)
+- **Alpha Range**: Typically -1.0 to +1.0 (annualized excess returns)
+
+**Index Beta/Alpha Statistics** (Index Fund Benchmarking):
+- **Records with Index Beta**: 1,379+ (relative to appropriate index fund proxies)
+- **Records with Index Alpha**: 1,379+ (Jensen's Alpha vs index benchmarks)
+- **Index Benchmarks Used**:
+  - Large Cap → Axis Nifty 100 Index Fund - Growth
+  - Mid Cap → Motilal Oswal Nifty Midcap 150 Index Fund
+  - Small Cap → Nippon India Nifty Smallcap 250 Index Fund Growth
+  - Multi Cap → HDFC NIFTY500 Multicap 50 25 25 Index Fund
+  - Debt Funds → HDFC Nifty PSU Bond Plus SDL Index Fund - Growth
+  - Hybrid/Other → Motilal Oswal Nifty 500 Index Fund
+- **Index Beta Range**: Typically -5.0 to +5.0 (correlation with index proxy)
+- **Index Alpha Range**: Typically -1.0 to +1.0 (excess return vs index)
+
+### Text-to-SQL Examples
+
+**1. "Find funds with best category-relative performance (highest alpha vs peers)"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    hr.lookback_period_years,
+    ROUND(hr.alpha, 4) as category_alpha,
+    ROUND(hr.beta, 4) as category_beta,
+    ROUND(hr.information_ratio, 4) as info_ratio,
+    hr.benchmark_category
+FROM historical_risk hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.alpha IS NOT NULL
+    AND hr.lookback_period_days = 252  -- 1 year
+ORDER BY hr.alpha DESC
+LIMIT 20;
+```
+
+**2. "Compare category vs index performance for equity funds"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_sub,
+    hr.lookback_period_years,
+    ROUND(hr.alpha, 4) as category_alpha,
+    ROUND(hr.beta, 4) as category_beta,
+    ROUND(hr.index_alpha, 4) as index_alpha,
+    ROUND(hr.index_beta, 4) as index_beta,
+    hr.benchmark_category,
+    hr.index_benchmark
+FROM historical_risk hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE s.amfi_broad = 'Equity'
+    AND hr.alpha IS NOT NULL
+    AND hr.index_alpha IS NOT NULL
+    AND hr.lookback_period_days = 252
+ORDER BY hr.index_alpha DESC
+LIMIT 15;
+```
+
+**3. "Find funds outperforming both peers and index benchmarks"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    ROUND(hr.alpha, 4) as category_alpha,
+    ROUND(hr.index_alpha, 4) as index_alpha,
+    ROUND(hr.information_ratio, 4) as info_ratio,
+    hr.benchmark_category,
+    hr.index_benchmark
+FROM historical_risk hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.alpha > 0.05  -- Positive category alpha
+    AND hr.index_alpha > 0.05  -- Positive index alpha
+    AND hr.lookback_period_days = 252
+ORDER BY (hr.alpha + hr.index_alpha) DESC
+LIMIT 25;
+```
+
+**4. "Analyze beta consistency across different benchmarks"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    hr.lookback_period_years,
+    ROUND(hr.beta, 4) as category_beta,
+    ROUND(hr.index_beta, 4) as index_beta,
+    ROUND(ABS(hr.beta - hr.index_beta), 4) as beta_difference,
+    hr.benchmark_category,
+    hr.index_benchmark
+FROM historical_risk hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.beta IS NOT NULL
+    AND hr.index_beta IS NOT NULL
+    AND hr.lookback_period_days = 252
+ORDER BY beta_difference
+LIMIT 20;
+```
+
+**5. "Find funds with best capital preservation (lowest maximum drawdown) in each category"**
+```sql
+WITH ranked_drawdown AS (
+    SELECT 
+        s.scheme_name,
+        s.amfi_broad,
+        s.amfi_sub,
+        hr.maximum_drawdown,
+        hr.annualized_volatility,
+        hr.avg_daily_return,
+        hr.data_points,
+        ROW_NUMBER() OVER (PARTITION BY s.amfi_broad ORDER BY hr.maximum_drawdown DESC) as drawdown_rank
+    FROM historical_risk hr
+    JOIN schemes s ON hr.scheme_id = s.id
+    WHERE hr.lookback_period_days = 252
+        AND hr.maximum_drawdown IS NOT NULL
+)
+SELECT 
+    scheme_name,
+    amfi_broad,
+    amfi_sub,
+    ROUND(maximum_drawdown, 2) as max_drawdown_pct,
+    ROUND(annualized_volatility, 4) as volatility_pct,
+    ROUND(avg_daily_return * 252, 2) as annualized_return_pct,
+    data_points
+FROM ranked_drawdown
+WHERE drawdown_rank <= 5
+ORDER BY amfi_broad, drawdown_rank;
+```
+
+**2. "Compare risk-adjusted returns across different lookback periods"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    hr.lookback_period_days / 252.0 as period_years,
+    ROUND(hr.annualized_volatility, 4) as volatility_pct,
+    ROUND(hr.avg_daily_return * 252, 2) as annualized_return_pct,
+    ROUND(
+        CASE 
+            WHEN hr.annualized_volatility > 0 THEN 
+                (hr.avg_daily_return * 252 - 6) / hr.annualized_volatility
+            ELSE NULL 
+        END, 3
+    ) as risk_adjusted_ratio,
+    hr.data_points
+FROM historical_risk hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE s.amfi_broad = 'Equity'
+    AND hr.annualized_volatility IS NOT NULL
+    AND hr.avg_daily_return * 252 > 10  -- Minimum 10% annualized return
+ORDER BY risk_adjusted_ratio DESC NULLS LAST
+LIMIT 20;
+```
+
+**3. "Identify funds with extreme return distributions (high skewness/kurtosis)"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    hr.lookback_period_years as period_years,
+    ROUND(hr.annualized_volatility, 4) as volatility_pct,
+    ROUND(hr.skewness, 3) as skewness,
+    ROUND(hr.kurtosis, 3) as kurtosis,
+    ROUND(hr.min_daily_return, 4) as worst_day_pct,
+    ROUND(hr.max_daily_return, 4) as best_day_pct,
+    hr.data_points
+FROM historical_risk hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.lookback_period_days = 252
+    AND (ABS(hr.skewness) > 1.5 OR ABS(hr.kurtosis) > 5)
+    AND hr.annualized_volatility IS NOT NULL
+ORDER BY ABS(hr.skewness) + ABS(hr.kurtosis) DESC
+LIMIT 25;
+```
+
+**4. "Find funds with consistent volatility across different time periods"**
+```sql
+WITH volatility_consistency AS (
+    SELECT 
+        hr.scheme_id,
+        COUNT(*) as period_count,
+        STDDEV(hr.annualized_volatility) as volatility_stddev,
+        AVG(hr.annualized_volatility) as avg_volatility,
+        MIN(hr.annualized_volatility) as min_volatility,
+        MAX(hr.annualized_volatility) as max_volatility
+    FROM historical_risk hr
+    WHERE hr.annualized_volatility IS NOT NULL
+    GROUP BY hr.scheme_id
+    HAVING COUNT(*) >= 3  -- At least 3 different periods
+)
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    vc.period_count,
+    ROUND(vc.avg_volatility, 4) as avg_volatility_pct,
+    ROUND(vc.volatility_stddev, 4) as volatility_consistency,
+    ROUND(vc.min_volatility, 4) as min_volatility_pct,
+    ROUND(vc.max_volatility, 4) as max_volatility_pct,
+    ROUND((vc.max_volatility - vc.min_volatility) / vc.avg_volatility * 100, 1) as volatility_range_pct
+FROM volatility_consistency vc
+JOIN schemes s ON vc.scheme_id = s.id
+WHERE vc.volatility_stddev < vc.avg_volatility * 0.2  -- Low volatility variation
+ORDER BY vc.volatility_stddev
+LIMIT 20;
+```
+
+**5. "Analyze volatility patterns by fund category and time horizon"**
+```sql
+SELECT 
+    s.amfi_broad,
+    hr.lookback_period_days / 252.0 as period_years,
+    COUNT(*) as fund_count,
+    ROUND(AVG(hr.annualized_volatility), 4) as avg_volatility,
+    ROUND(STDDEV(hr.annualized_volatility), 4) as volatility_dispersion,
+    ROUND(MIN(hr.annualized_volatility), 4) as min_volatility,
+    ROUND(MAX(hr.annualized_volatility), 4) as max_volatility,
+    ROUND(PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY hr.annualized_volatility), 4) as q1_volatility,
+    ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY hr.annualized_volatility), 4) as median_volatility,
+    ROUND(PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY hr.annualized_volatility), 4) as q3_volatility
+FROM historical_risk hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.annualized_volatility IS NOT NULL
+GROUP BY s.amfi_broad, hr.lookback_period_days
+ORDER BY s.amfi_broad, period_years;
+```
+
+**6. "Find funds with best downside protection (low negative skewness, controlled max loss)"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    ROUND(hr.annualized_volatility, 4) as volatility_pct,
+    ROUND(hr.avg_daily_return * 252, 2) as annualized_return_pct,
+    ROUND(hr.skewness, 3) as skewness,
+    ROUND(hr.min_daily_return, 4) as worst_day_pct,
+    ROUND(hr.max_daily_return, 4) as best_day_pct,
+    ROUND(ABS(hr.min_daily_return) / hr.max_daily_return, 2) as downside_upside_ratio,
+    hr.data_points
+FROM historical_risk hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.lookback_period_days = 252
+    AND hr.skewness > -0.5  -- Not too negatively skewed
+    AND hr.min_daily_return > -5.0  -- Max loss less than 5% in a day
+    AND hr.annualized_volatility IS NOT NULL
+    AND hr.avg_daily_return > 0  -- Positive average returns
+ORDER BY hr.skewness DESC, hr.min_daily_return DESC
+LIMIT 25;
+```
+
+**7. "Calculate Value at Risk (VaR) approximation using volatility"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    ROUND(hr.annualized_volatility, 4) as annual_volatility_pct,
+    ROUND(hr.avg_daily_return * 252, 2) as expected_annual_return_pct,
+    -- 1-day VaR at 95% confidence (1.645 * daily_volatility)
+    ROUND(1.645 * (hr.annualized_volatility / SQRT(252)), 4) as var_1day_95_pct,
+    -- 1-day VaR at 99% confidence (2.33 * daily_volatility)
+    ROUND(2.33 * (hr.annualized_volatility / SQRT(252)), 4) as var_1day_99_pct,
+    -- Monthly VaR at 95% confidence
+    ROUND(1.645 * (hr.annualized_volatility / SQRT(12)), 4) as var_1month_95_pct,
+    hr.data_points
+FROM historical_risk hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.lookback_period_days = 252
+    AND hr.annualized_volatility IS NOT NULL
+    AND s.amfi_broad IN ('Equity', 'Hybrid')
+ORDER BY hr.annualized_volatility DESC
+LIMIT 20;
+```
+
+**8. "Compare actual vs predicted volatility using different time horizons"**
+```sql
+WITH volatility_comparison AS (
+    SELECT 
+        hr1.scheme_id,
+        hr1.annualized_volatility as vol_1y,
+        hr2.annualized_volatility as vol_2y,
+        hr3.annualized_volatility as vol_3y,
+        hr5.annualized_volatility as vol_5y
+    FROM historical_risk hr1
+    LEFT JOIN historical_risk hr2 ON hr1.scheme_id = hr2.scheme_id AND hr2.lookback_period_days = 504
+    LEFT JOIN historical_risk hr3 ON hr1.scheme_id = hr3.scheme_id AND hr3.lookback_period_days = 756
+    LEFT JOIN historical_risk hr5 ON hr1.scheme_id = hr5.scheme_id AND hr5.lookback_period_days = 1260
+    WHERE hr1.lookback_period_days = 252
+)
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    ROUND(vc.vol_1y, 4) as volatility_1y,
+    ROUND(vc.vol_2y, 4) as volatility_2y,
+    ROUND(vc.vol_3y, 4) as volatility_3y,
+    ROUND(vc.vol_5y, 4) as volatility_5y,
+    ROUND(STDDEV(val.volatility), 4) as volatility_stability
+FROM volatility_comparison vc
+JOIN schemes s ON vc.scheme_id = s.id
+CROSS JOIN LATERAL (
+    VALUES (vc.vol_1y), (vc.vol_2y), (vc.vol_3y), (vc.vol_5y)
+) AS val(volatility)
+WHERE vc.vol_1y IS NOT NULL 
+    AND vc.vol_2y IS NOT NULL 
+    AND vc.vol_3y IS NOT NULL
+GROUP BY s.scheme_name, s.amfi_broad, vc.vol_1y, vc.vol_2y, vc.vol_3y, vc.vol_5y
+ORDER BY volatility_stability
+LIMIT 20;
+```
+
+---
+
+## 10. HISTORICAL_NAV Table (Legacy Reference)
 
 **Purpose**: Complete historical Net Asset Value data for all mutual fund schemes
 
@@ -946,6 +1633,115 @@ ORDER BY correlation_with_nifty DESC;
 
 ---
 
-*Last Updated: September 11, 2025*
-*Total Records: 3,052,270 across 7 tables (including 3,037,708 historical NAV records)*
+---
+
+## Advanced Multi-Table Analysis Queries
+
+### Portfolio Performance with Rolling Returns
+```sql
+-- Build a comprehensive portfolio analysis using rolling returns
+SELECT 
+    s.amfi_broad,
+    s.scheme_name,
+    s.risk_level,
+    hr.rolling_return_1y,
+    hr.rolling_return_3y,
+    hr.rolling_return_5y,
+    hr.daily_return,
+    sip.min_amount as min_sip,
+    CASE WHEN b.exit_load_flag THEN 'Yes' ELSE 'No' END as exit_load,
+    s.aum_in_lakhs
+FROM schemes s
+JOIN historical_returns hr ON s.id = hr.scheme_id
+LEFT JOIN bse_details b ON s.id = b.scheme_id
+LEFT JOIN sip_configurations sip ON b.id = sip.bse_detail_id
+WHERE s.sip_allowed = true 
+    AND hr.rolling_return_1y IS NOT NULL
+    AND hr.nav_date = (
+        SELECT MAX(nav_date) 
+        FROM historical_returns hr2 
+        WHERE hr2.scheme_id = hr.scheme_id 
+        AND hr2.rolling_return_1y IS NOT NULL
+    )
+    AND hr.rolling_return_1y > 15
+    AND s.risk_level BETWEEN 2 AND 4
+ORDER BY s.amfi_broad, hr.rolling_return_5y DESC NULLS LAST;
+```
+
+### Complete Investment Platform Query
+```sql
+-- Complete fund information for investment platform with rolling returns
+SELECT 
+    s.scheme_name,
+    s.amfi_broad || ' - ' || s.amfi_sub as category,
+    s.current_nav,
+    s.aum_in_lakhs,
+    s.risk_level,
+    sr.yrs1, sr.yrs3, sr.yrs5,
+    hr.rolling_return_1y,
+    hr.rolling_return_3y,
+    hr.rolling_return_5y,
+    hr.daily_return as latest_daily_return,
+    hr_sharpe.sharpe_ratio,
+    sip.min_amount as min_sip,
+    tc.fresh_min as min_lumpsum,
+    b.exit_load_message
+FROM schemes s
+LEFT JOIN scheme_returns sr ON s.id = sr.scheme_id
+LEFT JOIN historical_returns hr ON s.id = hr.scheme_id AND hr.nav_date = (
+    SELECT MAX(nav_date) FROM historical_returns hr2 WHERE hr2.scheme_id = hr.scheme_id
+)
+LEFT JOIN historical_risk hr_sharpe ON s.id = hr_sharpe.scheme_id AND hr_sharpe.lookback_period_days = 252
+LEFT JOIN bse_details b ON s.id = b.scheme_id
+LEFT JOIN sip_configurations sip ON b.id = sip.bse_detail_id AND sip.sip_type = 'regular'
+LEFT JOIN transaction_configurations tc ON b.id = tc.bse_detail_id AND tc.transaction_type = 'purchase'
+WHERE s.purchase_allowed = true OR s.sip_allowed = true
+ORDER BY s.aum_in_lakhs DESC;
+```
+
+---
+
+## Database Maintenance
+
+### Update Script
+```bash
+# Refresh data from MF APIs Club
+python3 setup_mfapis_club_postgresql.py
+
+# Calculate historical returns and rolling returns
+python3 calculate_historical_returns.py
+python3 add_rolling_returns_complete.py
+
+# Calculate risk metrics and volatility
+python3 create_historical_risk_table.py
+
+# Add maximum drawdown calculations
+python3 add_maximum_drawdown.py
+
+# Add lookback period in years column
+python3 add_lookback_years_column.py
+
+# Add Value at Risk (VaR) 95% calculations
+python3 add_var_95_column.py
+
+# Add Sharpe and Sortino ratio calculations
+python3 add_sharpe_sortino_ratios.py
+```
+
+### Backup Command
+```bash
+pg_dump mutual_fund > mutual_fund_backup_$(date +%Y%m%d).sql
+```
+
+### Performance Optimization
+- All foreign keys have indexes
+- Frequently queried columns are indexed
+- JSONB columns support GIN indexes for array operations
+- Rolling returns columns have conditional indexes for performance
+- Time-series queries optimized with date-based partitioning considerations
+
+---
+
+*Last Updated: September 12, 2025*
+*Total Records: 6,078,093 across 10 tables (including 3,037,708 historical NAV records, 3,036,230 historical returns records, and 4,155 historical risk records)*
 *Data Sources: MF APIs Club (https://app.mfapis.club) + MFApi.in (https://api.mfapi.in)*
