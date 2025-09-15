@@ -75,6 +75,8 @@ class DataFormatterAgent:
         """
         try:
             logger.info("📊 Starting data formatting and visualization")
+            logger.info(f"Input data keys: {list(quant_data.keys())}")
+            logger.info(f"Success flag: {quant_data.get('success', False)}")
             
             if not quant_data.get('success', False):
                 logger.warning("Received unsuccessful data from Quant Agent")
@@ -93,12 +95,34 @@ class DataFormatterAgent:
             dataframe_info = quant_data.get('dataframe_info', {})
             original_sql_data = quant_data.get('original_sql_data', {})
             
-            # Convert back to DataFrame for visualization
-            df = pd.DataFrame(dataframe_data) if dataframe_data else None
+            logger.info(f"Dataframe data length: {len(dataframe_data)}")
+            logger.info(f"Dataframe data sample: {dataframe_data[:2] if dataframe_data else 'Empty'}")
+            logger.info(f"Dataframe data type: {type(dataframe_data)}")
             
-            # Determine if charts should be included
+            # Convert to DataFrame if we have data
+            df = None
+            if dataframe_data:
+                try:
+                    df = pd.DataFrame(dataframe_data)
+                    logger.info(f"✅ Created DataFrame with shape: {df.shape}")
+                    logger.info(f"📊 DataFrame columns: {list(df.columns)}")
+                    logger.info(f"📊 DataFrame dtypes: {df.dtypes.to_dict()}")
+                    logger.info(f"📊 DataFrame head: {df.head().to_dict()}")
+                except Exception as e:
+                    logger.error(f"❌ Error creating DataFrame: {e}")
+                    logger.error(f"❌ Dataframe_data content: {dataframe_data}")
+                    df = None
+            else:
+                logger.warning("⚠️ No dataframe_data provided to formatter agent")
+            
+            logger.info(f"DataFrame columns: {list(df.columns) if df is not None else 'None'}")
+            logger.info(f"DataFrame sample data: {df.head(2).to_dict() if df is not None and not df.empty else 'None'}")
+            
             include_chart = self._should_include_chart(query, df)
             include_table = self._should_include_table(query, df)
+            
+            logger.info(f"Chart inclusion decision: {include_chart}")
+            logger.info(f"Table inclusion decision: {include_table}")
             
             # Generate mixed response
             response_data = self._generate_mixed_response(
@@ -126,19 +150,61 @@ class DataFormatterAgent:
     
     def _should_include_chart(self, query: str, df: Optional[pd.DataFrame]) -> bool:
         """Determine if a chart should be included in the response."""
-        if not PLOTLY_AVAILABLE or df is None or df.empty:
+        if not PLOTLY_AVAILABLE:
+            logger.warning("Plotly not available - cannot create charts")
+            return False
+            
+        if df is None or df.empty:
+            logger.info(f"No data available for charting - df is {'None' if df is None else 'empty'}")
             return False
         
-        # Always include chart if explicitly requested
-        if self._is_chart_request(query):
+        query_lower = query.lower()
+        logger.info(f"Chart decision for query: '{query[:50]}...'")
+        logger.info(f"DataFrame shape: {df.shape}, columns: {list(df.columns)}")
+        
+        # Don't create charts for informational/metadata queries
+        info_keywords = [
+            'tables', 'schemas', 'columns', 'describe', 'schema', 'structure',
+            'what tables', 'show tables', 'list tables', 'available tables',
+            'database info', 'table info', 'column info', 'metadata'
+        ]
+        if any(keyword in query_lower for keyword in info_keywords):
+            logger.info("Skipping chart - detected informational query")
+            return False
+        
+        # Always include chart if explicitly requested with visualization keywords (highest priority)
+        explicit_chart_keywords = [
+            'chart', 'graph', 'plot', 'visualize', 'visualization', 'bar chart', 
+            'line chart', 'pie chart', 'scatter plot', 'histogram'
+        ]
+        
+        # Check the original query, not the truncated conversation context
+        original_query = query.split('Previous conversation context:')[0].strip() if 'Previous conversation context:' in query else query
+        original_query_lower = original_query.lower()
+        
+        if any(keyword in original_query_lower for keyword in explicit_chart_keywords):
+            logger.info(f"Creating chart - explicit visualization request detected in: '{original_query[:100]}...'")
             return True
         
-        # Include chart for comparison queries with reasonable data size
+        # Don't create charts for simple text responses without numerical data
+        # (only applies to non-explicit requests)
+        if df is not None:
+            numeric_cols = df.select_dtypes(include=['number']).columns
+            logger.info(f"Numeric columns found: {list(numeric_cols)}")
+            if len(numeric_cols) == 0:
+                logger.info("Skipping chart - no numeric data found")
+                return False
+        
+        # Include chart for comparison queries with reasonable data size and numeric data
         if self._detect_calculation_type(query) == 'comparison_analysis' and len(df) <= 50:
             return True
         
         # Include chart for performance analysis with time series data
         if self._detect_calculation_type(query) == 'performance_analysis' and len(df) > 2:
+            return True
+        
+        # Include chart for statistical analysis with numeric data
+        if self._detect_calculation_type(query) == 'statistical_analysis' and len(df) > 1:
             return True
         
         return False
@@ -148,14 +214,28 @@ class DataFormatterAgent:
         if df is None or df.empty:
             return False
         
-        # Include table for small datasets or when explicitly requested
-        table_keywords = ['table', 'data', 'records', 'list', 'show all']
-        if any(keyword in query.lower() for keyword in table_keywords):
+        # Don't create tables for informational/metadata queries
+        info_keywords = [
+            'tables', 'schemas', 'columns', 'describe', 'schema', 'structure',
+            'what tables', 'show tables', 'list tables', 'available tables',
+            'database info', 'table info', 'column info', 'metadata'
+        ]
+        query_lower = query.lower()
+        if any(keyword in query_lower for keyword in info_keywords):
+            return False
+        
+        # Include table when explicitly requested with specific keywords
+        explicit_table_keywords = ['show data', 'display data', 'data table', 'records', 'show all records']
+        if any(keyword in query_lower for keyword in explicit_table_keywords):
             return True
         
-        # Include table for small datasets (< 10 rows)
+        # Include table for actual data queries with small datasets (< 10 rows)
+        # But only if it contains meaningful numeric or structured data
         if len(df) <= 10:
-            return True
+            # Check if the data contains meaningful columns (not just text descriptions)
+            numeric_cols = df.select_dtypes(include=['number']).columns
+            if len(numeric_cols) > 0 or len(df.columns) > 2:
+                return True
         
         return False
     
@@ -163,9 +243,12 @@ class DataFormatterAgent:
         """Check if the query explicitly requests a chart or visualization."""
         chart_keywords = [
             'chart', 'graph', 'plot', 'visualize', 'visualization', 'bar chart', 'line chart',
-            'pie chart', 'scatter plot', 'histogram', 'show me', 'display', 'draw'
+            'pie chart', 'scatter plot', 'histogram', 'draw'
         ]
         query_lower = query.lower()
+        
+        # Remove generic keywords that don't necessarily mean chart request
+        # "show me" and "display" are too generic and can refer to listing tables/info
         return any(keyword in query_lower for keyword in chart_keywords)
     
     def _detect_calculation_type(self, query: str) -> Optional[str]:
@@ -227,11 +310,7 @@ class DataFormatterAgent:
                     # Add chart success notification
                     response_parts.append(f"\n📊 **Interactive Chart Generated**: {chart_info['chart_type'].title()} chart created successfully.")
             
-            # Add insights from quantitative analysis (if any)
-            if insights:
-                response_parts.append("\n\n**Key Insights:**")
-                for insight in insights:
-                    response_parts.append(f"• {insight}")
+            # Key Insights section removed per user request
             
             # Add data table if requested
             data_table = None

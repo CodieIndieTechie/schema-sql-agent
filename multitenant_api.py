@@ -47,6 +47,8 @@ from multi_sheet_uploader import MultiSheetExcelUploader
 from celery_tasks import create_file_processing_task, get_task_status
 from services.mcp_orchestrator import get_mcp_orchestrator
 from database_discovery import discovery_service
+from session_api import router as session_router
+from session_manager import session_manager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -195,11 +197,12 @@ def create_multitenant_sql_agent(database_uri: str, schema_name: str = None) -> 
         mutual_fund_db_uri = settings.get_database_uri("mutual_fund")
         db = SQLDatabase.from_uri(mutual_fund_db_uri)
         
-        # Initialize OpenAI LLM
+        # Initialize OpenAI LLM with consistent settings to reduce hallucination
         llm = ChatOpenAI(
-            model="gpt-4o",
-            temperature=0,
-            openai_api_key=settings.openai_api_key
+            model=settings.openai_model,
+            temperature=settings.openai_temperature,  # Use 0.0 for deterministic SQL generation
+            openai_api_key=settings.openai_api_key,
+            max_tokens=settings.openai_max_tokens
         )
         
         # Create SQL toolkit for the user's schema
@@ -518,10 +521,30 @@ async def query_database(
     current_user: User = Depends(get_current_user),
     db_session = Depends(get_db_session_with_schema)
 ):
-    """Process natural language query using the new three-agent pipeline architecture."""
+    """Process natural language query with comprehensive memory and session management."""
     try:
         # Ensure user schema exists
         ensure_user_schema(current_user.email)
+        
+        # Get or create active session for memory persistence
+        chat_session = session_manager.get_or_create_active_session(current_user.email)
+        
+        # Add user message to chat history
+        user_message = session_manager.add_message(
+            session_id=chat_session.session_id,
+            message_type="human",
+            content=request.query,
+            metadata={"timestamp": datetime.now().isoformat()}
+        )
+        
+        # Get conversation context for agent memory
+        conversation_summary = session_manager.get_conversation_summary(
+            chat_session.session_id, 
+            last_n_messages=10
+        )
+        
+        # Get user preferences for personalized responses
+        user_preferences = session_manager.get_user_preferences(current_user.email)
         
         # Get user session from schema user service
         session = schema_user_service.create_session_from_email(current_user.email, current_user.name)
@@ -529,19 +552,68 @@ async def query_database(
         # Get MCP orchestrator instance
         orchestrator = get_mcp_orchestrator(static_dir="static/charts")
         
-        # Generate session ID for this query
-        session_id = f"{current_user.email}_{session.email}"
+        # Enhanced query with memory context
+        enhanced_query = request.query
+        if conversation_summary and conversation_summary != "No previous conversation history.":
+            enhanced_query = f"""
+Previous conversation context:
+{conversation_summary}
+
+User preferences: {user_preferences}
+
+Current query: {request.query}
+
+Please consider the conversation history and user preferences when responding.
+"""
         
         # Process query through MCP orchestrator
         result = await orchestrator.process_query(
-            query=request.query,
+            query=enhanced_query,
             user_email=current_user.email,
-            session_id=session_id
+            session_id=str(chat_session.session_id)
         )
         
         # Extract chart files from MCP result
         chart_files = result.get("chart_files", [])
         chart_file = chart_files[0] if chart_files else None
+        
+        # Store query results and charts in context
+        if chart_files:
+            session_manager.set_context(
+                chat_session.session_id,
+                "chart_context",
+                "last_generated_charts",
+                chart_files,
+                expires_hours=24
+            )
+        
+        # Store successful query pattern for learning
+        session_manager.set_context(
+            chat_session.session_id,
+            "query_context",
+            "last_successful_query",
+            {
+                "query": request.query,
+                "response_type": "success",
+                "had_charts": bool(chart_files),
+                "timestamp": datetime.now().isoformat()
+            },
+            expires_hours=168  # 1 week
+        )
+        
+        # Add AI response to chat history
+        ai_message = session_manager.add_message(
+            session_id=chat_session.session_id,
+            message_type="ai",
+            content=result.get("response", "No response generated"),
+            metadata={
+                "timestamp": datetime.now().isoformat(),
+                "orchestrator_used": True,
+                "processing_time": result.get("processing_time")
+            },
+            chart_files=chart_files,
+            query_results=result.get("metadata")
+        )
         
         return QueryResponse(
             response=result.get("response", "No response generated"),
@@ -551,7 +623,7 @@ async def query_database(
             error=result.get("metadata", {}).get("error"),
             chart_file=chart_file,
             chart_type="plotly" if chart_file else None,
-            session_id=session_id,
+            session_id=str(chat_session.session_id),
             metadata=result.get("metadata", {})
         )
         
@@ -568,7 +640,7 @@ async def query_database(
 
 @app.post("/query-no-auth", response_model=QueryResponse)
 async def query_database_no_auth(request: QueryRequest):
-    """Temporary endpoint without authentication for testing - uses MCP orchestrator."""
+    """No-auth endpoint with full memory capabilities for testing and development."""
     try:
         # Use anonymous user for testing
         anonymous_email = "anonymous@example.com"
@@ -576,20 +648,93 @@ async def query_database_no_auth(request: QueryRequest):
         # Ensure anonymous schema exists
         ensure_user_schema(anonymous_email)
         
-        # Use direct SQL agent for query processing
+        # Get or create active session for memory persistence
+        chat_session = session_manager.get_or_create_active_session(anonymous_email)
+        
+        # Add user message to chat history
+        user_message = session_manager.add_message(
+            session_id=chat_session.session_id,
+            message_type="human",
+            content=request.query,
+            metadata={"timestamp": datetime.now().isoformat(), "no_auth": True}
+        )
+        
+        # Get conversation context for agent memory
+        conversation_summary = session_manager.get_conversation_summary(
+            chat_session.session_id, 
+            last_n_messages=10
+        )
+        
+        # Get user preferences for personalized responses
+        user_preferences = session_manager.get_user_preferences(anonymous_email)
+        
+        # Use Agent Orchestrator for graph-based coordination
         try:
-            # Use Agent Orchestrator for graph-based coordination
             from services.agent_orchestrator import AgentOrchestrator
             orchestrator = AgentOrchestrator()
             
-            # Generate unique session ID for each user session to enable memory
-            session_id = request.session_id or f"session_{uuid.uuid4().hex[:12]}"
+            # Enhanced query with memory context
+            enhanced_query = request.query
+            if conversation_summary and conversation_summary != "No previous conversation history.":
+                enhanced_query = f"""
+Previous conversation context:
+{conversation_summary}
+
+User preferences: {user_preferences}
+
+Current query: {request.query}
+
+Please consider the conversation history and user preferences when responding.
+"""
             
             # Execute query with graph-based agent coordination
             result = await orchestrator.process_query(
-                query=request.query,
+                query=enhanced_query,
                 user_email=anonymous_email,
-                session_id=session_id
+                session_id=str(chat_session.session_id)
+            )
+            
+            # Extract chart files from result
+            chart_files = result.get("chart_files", [])
+            chart_file = chart_files[0] if chart_files else None
+            
+            # Store query results and charts in context
+            if chart_files:
+                session_manager.set_context(
+                    chat_session.session_id,
+                    "chart_context",
+                    "last_generated_charts",
+                    chart_files,
+                    expires_hours=24
+                )
+            
+            # Store successful query pattern for learning
+            session_manager.set_context(
+                chat_session.session_id,
+                "query_context",
+                "last_successful_query",
+                {
+                    "query": request.query,
+                    "response_type": "success",
+                    "had_charts": bool(chart_files),
+                    "timestamp": datetime.now().isoformat()
+                },
+                expires_hours=168  # 1 week
+            )
+            
+            # Add AI response to chat history
+            ai_message = session_manager.add_message(
+                session_id=chat_session.session_id,
+                message_type="ai",
+                content=result.get("sql_response", result.get("response", "No response generated")),
+                metadata={
+                    "timestamp": datetime.now().isoformat(),
+                    "orchestrator_used": True,
+                    "no_auth": True,
+                    "processing_time": result.get("processing_time")
+                },
+                chart_files=chart_files,
+                query_results=result.get("metadata")
             )
             
             return QueryResponse(
@@ -600,18 +745,29 @@ async def query_database_no_auth(request: QueryRequest):
                 error=result.get("error"),
                 chart_file=result.get("chart_file"),
                 chart_type=result.get("chart_type"),
-                session_id=session_id
+                session_id=str(chat_session.session_id)
             )
             
         except Exception as agent_error:
             logger.error(f"SQL agent error: {str(agent_error)}")
+            # Add error message to chat history for context
+            session_manager.add_message(
+                session_id=chat_session.session_id,
+                message_type="ai",
+                content=f"I apologize, but I encountered an error while processing your query: {str(agent_error)}",
+                metadata={
+                    "timestamp": datetime.now().isoformat(),
+                    "error": True,
+                    "no_auth": True
+                }
+            )
             return QueryResponse(
                 response=f"I apologize, but I encountered an error while processing your query: {str(agent_error)}",
                 user_id=anonymous_email,
                 schema="anonymous_schema",
                 success=False,
                 error=str(agent_error),
-                session_id="anonymous_session"
+                session_id=str(chat_session.session_id)
             )
         
     except Exception as e:
@@ -1202,6 +1358,9 @@ async def serve_chart_embed(chart_file: str):
         logger.error(f"Error serving chart embed {chart_file}: {str(e)}")
         raise HTTPException(status_code=500, detail="Error serving chart")
 
+
+# Include session management routes
+app.include_router(session_router)
 
 # All routes are now handled by the three-agent orchestrator pipeline above
 

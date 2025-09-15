@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Send } from "lucide-react";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
@@ -20,6 +20,7 @@ interface Message {
   chartFile?: string;
   chartType?: string;
   hasChart?: boolean;
+  sessionId?: string;
 }
 
 interface UploadedFile {
@@ -30,20 +31,186 @@ interface UploadedFile {
   taskId?: string;
 }
 
+interface SessionData {
+  sessionId: string;
+  messages: Message[];
+  lastActivity: string;
+}
+
+// Session persistence utilities
+const SESSION_STORAGE_KEY = 'chatfolio_session';
+const MESSAGES_STORAGE_KEY = 'chatfolio_messages';
+
+const saveSessionToStorage = (sessionId: string, messages: Message[]) => {
+  try {
+    const sessionData: SessionData = {
+      sessionId,
+      messages: messages.map(msg => ({
+        ...msg,
+        timestamp: msg.timestamp instanceof Date ? msg.timestamp.toISOString() : msg.timestamp
+      })) as any,
+      lastActivity: new Date().toISOString()
+    };
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionData));
+  } catch (error) {
+    console.warn('Failed to save session to localStorage:', error);
+  }
+};
+
+const loadSessionFromStorage = (): SessionData | null => {
+  try {
+    const stored = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!stored) return null;
+    
+    const sessionData: SessionData = JSON.parse(stored);
+    
+    // Convert timestamp strings back to Date objects
+    sessionData.messages = sessionData.messages.map(msg => ({
+      ...msg,
+      timestamp: new Date(msg.timestamp as any)
+    }));
+    
+    return sessionData;
+  } catch (error) {
+    console.warn('Failed to load session from localStorage:', error);
+    return null;
+  }
+};
+
+const clearSessionStorage = () => {
+  try {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    localStorage.removeItem(MESSAGES_STORAGE_KEY);
+  } catch (error) {
+    console.warn('Failed to clear session storage:', error);
+  }
+};
+
 const ChatInterface = () => {
-  const { getToken } = useAuth();
-  const [sessionId] = useState(() => `chat-session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      content: "Hello! I'm your SQL Agent assistant. I can help you query your database, upload CSV/Excel files, and create charts from your data. What would you like to know?",
-      role: 'assistant',
-      timestamp: new Date()
-    }
-  ]);
+  const { getToken, user } = useAuth();
+  
+  // Initialize session and messages from storage or create new
+  const [sessionId, setSessionId] = useState<string>('');
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // Initialize session and load chat history on component mount
+  useEffect(() => {
+    const initializeSession = async () => {
+      if (!user?.email) return;
+      
+      try {
+        // Try to load existing session from localStorage
+        const storedSession = loadSessionFromStorage();
+        
+        if (storedSession && storedSession.messages.length > 0) {
+          // Restore from localStorage
+          setSessionId(storedSession.sessionId);
+          setMessages(storedSession.messages);
+          console.log('Restored session from localStorage:', storedSession.sessionId);
+        } else {
+          // Get or create active session from backend
+          const token = getToken();
+          if (!token) {
+            throw new Error('No authentication token found');
+          }
+          
+          const response = await fetch(`http://localhost:8001/api/sessions/active/${encodeURIComponent(user.email)}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (response.ok) {
+            const sessionData = await response.json();
+            const newSessionId = sessionData.session_id;
+            setSessionId(newSessionId);
+            
+            // Load messages from backend
+            const messagesResponse = await fetch(`http://localhost:8001/api/sessions/messages/${newSessionId}?limit=100`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            
+            if (messagesResponse.ok) {
+              const messagesData = await messagesResponse.json();
+              const loadedMessages: Message[] = messagesData.map((msg: any) => ({
+                id: msg.id,
+                content: msg.content,
+                role: msg.message_type === 'human' ? 'user' : 'assistant',
+                timestamp: new Date(msg.timestamp),
+                chartFile: msg.chart_files ? JSON.parse(msg.chart_files)[0] : undefined,
+                hasChart: msg.chart_files ? JSON.parse(msg.chart_files).length > 0 : false,
+                sessionId: newSessionId
+              }));
+              
+              if (loadedMessages.length === 0) {
+                // Add welcome message for new sessions
+                const welcomeMessage: Message = {
+                  id: '1',
+                  content: "Hello! I'm your SQL Agent assistant with memory capabilities. I can remember our previous conversations and help you query your database, upload CSV/Excel files, and create charts from your data. What would you like to know?",
+                  role: 'assistant',
+                  timestamp: new Date(),
+                  sessionId: newSessionId
+                };
+                setMessages([welcomeMessage]);
+                saveSessionToStorage(newSessionId, [welcomeMessage]);
+              } else {
+                setMessages(loadedMessages);
+                saveSessionToStorage(newSessionId, loadedMessages);
+              }
+              
+              console.log('Loaded session from backend:', newSessionId, 'with', loadedMessages.length, 'messages');
+            }
+          } else {
+            // Fallback to local session
+            const fallbackSessionId = `chat-session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            setSessionId(fallbackSessionId);
+            const welcomeMessage: Message = {
+              id: '1',
+              content: "Hello! I'm your SQL Agent assistant. I can help you query your database, upload CSV/Excel files, and create charts from your data. What would you like to know?",
+              role: 'assistant',
+              timestamp: new Date(),
+              sessionId: fallbackSessionId
+            };
+            setMessages([welcomeMessage]);
+            saveSessionToStorage(fallbackSessionId, [welcomeMessage]);
+          }
+        }
+      } catch (error) {
+        console.error('Error initializing session:', error);
+        // Fallback to local session
+        const fallbackSessionId = `chat-session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        setSessionId(fallbackSessionId);
+        const welcomeMessage: Message = {
+          id: '1',
+          content: "Hello! I'm your SQL Agent assistant. I can help you query your database, upload CSV/Excel files, and create charts from your data. What would you like to know?",
+          role: 'assistant',
+          timestamp: new Date(),
+          sessionId: fallbackSessionId
+        };
+        setMessages([welcomeMessage]);
+        saveSessionToStorage(fallbackSessionId, [welcomeMessage]);
+      } finally {
+        setIsInitialized(true);
+      }
+    };
+    
+    initializeSession();
+  }, [user?.email, getToken]);
+
+  // Save messages to localStorage whenever messages change
+  useEffect(() => {
+    if (isInitialized && sessionId && messages.length > 0) {
+      saveSessionToStorage(sessionId, messages);
+    }
+  }, [messages, sessionId, isInitialized]);
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
@@ -67,12 +234,11 @@ const ChatInterface = () => {
         throw new Error('No authentication token found');
       }
       
-      // Call our backend API with authentication
+      // Call our backend API - temporarily using no-auth endpoint while fixing authentication
       const response = await fetch('http://localhost:8001/query-no-auth', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
           query: inputMessage,

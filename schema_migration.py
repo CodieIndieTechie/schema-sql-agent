@@ -66,25 +66,78 @@ class User(Base):
     def __repr__(self):
         return f"<User(user_id={self.user_id}, email='{self.email}', tenant_id={self.tenant_id})>"
 
+class ChatSession(Base):
+    """Chat session table - tracks user sessions and conversation contexts."""
+    __tablename__ = 'chat_sessions'
+    
+    session_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_email = Column(String(255), nullable=False, index=True)
+    session_name = Column(String(255), nullable=True)  # Optional user-defined name
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    is_active = Column(Boolean, default=True)
+    session_metadata = Column(String, nullable=True)  # JSON string for session context
+    
+    # Relationships
+    messages = relationship("ChatHistory", back_populates="session", cascade="all, delete-orphan")
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_chat_sessions_user_active', 'user_email', 'is_active'),
+        Index('idx_chat_sessions_updated', 'updated_at'),
+    )
+    
+    def __repr__(self):
+        return f"<ChatSession(session_id={self.session_id}, user='{self.user_email}', active={self.is_active})>"
+
 class ChatHistory(Base):
     """Chat history table in public schema - stores LangChain agent's persistent memory."""
     __tablename__ = 'chat_history'
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(String(255), nullable=False, index=True)  # user email or unique session ID
+    session_id = Column(UUID(as_uuid=True), ForeignKey('chat_sessions.session_id'), nullable=False, index=True)
     message_type = Column(String(50), nullable=False)  # 'human', 'ai', 'system'
     content = Column(String, nullable=False)
     timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
     message_metadata = Column(String, nullable=True)  # JSON string for additional metadata
+    chart_files = Column(String, nullable=True)  # JSON array of chart filenames
+    query_results = Column(String, nullable=True)  # JSON string for SQL query results
+    
+    # Relationships
+    session = relationship("ChatSession", back_populates="messages")
     
     # Index for efficient session retrieval
     __table_args__ = (
         Index('idx_chat_history_session_timestamp', 'session_id', 'timestamp'),
         Index('idx_chat_history_session_type', 'session_id', 'message_type'),
+        Index('idx_chat_history_timestamp', 'timestamp'),
     )
     
     def __repr__(self):
-        return f"<ChatHistory(session_id='{self.session_id}', type='{self.message_type}', timestamp={self.timestamp})>"
+        return f"<ChatHistory(session_id={self.session_id}, type='{self.message_type}', timestamp={self.timestamp})>"
+
+class ConversationContext(Base):
+    """Conversation context table - stores semantic context and memory for agents."""
+    __tablename__ = 'conversation_contexts'
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey('chat_sessions.session_id'), nullable=False, index=True)
+    context_type = Column(String(50), nullable=False)  # 'data_context', 'chart_context', 'query_context', 'user_preference'
+    context_key = Column(String(255), nullable=False)  # Key for the context (e.g., 'last_query', 'preferred_chart_type')
+    context_value = Column(String, nullable=False)  # JSON string or text value
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=True)  # Optional expiration
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_conversation_context_session_type', 'session_id', 'context_type'),
+        Index('idx_conversation_context_key', 'context_key'),
+        Index('idx_conversation_context_expires', 'expires_at'),
+        UniqueConstraint('session_id', 'context_type', 'context_key', name='uq_session_context_key'),
+    )
+    
+    def __repr__(self):
+        return f"<ConversationContext(session_id={self.session_id}, type='{self.context_type}', key='{self.context_key}')>"
 
 # Pydantic models for API responses
 class TenantResponse(BaseModel):
@@ -103,6 +156,34 @@ class UserResponse(BaseModel):
     created_at: datetime
     last_login: Optional[datetime]
     is_active: bool
+
+class ChatSessionResponse(BaseModel):
+    session_id: str
+    user_email: str
+    session_name: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool
+    message_count: Optional[int] = 0
+
+class ChatMessageResponse(BaseModel):
+    id: str
+    session_id: str
+    message_type: str
+    content: str
+    timestamp: datetime
+    message_metadata: Optional[str]
+    chart_files: Optional[str]
+    query_results: Optional[str]
+
+class ConversationContextResponse(BaseModel):
+    id: str
+    session_id: str
+    context_type: str
+    context_key: str
+    context_value: str
+    created_at: datetime
+    expires_at: Optional[datetime]
 
 def email_to_schema_name(email: str) -> str:
     """
