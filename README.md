@@ -1,22 +1,55 @@
-# MCP-Based SQL Analysis System
+# 🏦 Intelligent Mutual Fund Analysis Platform
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-green.svg)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Next.js-15.3.4-black.svg)](https://nextjs.org)
 [![MCP](https://img.shields.io/badge/MCP-Protocol-orange.svg)](https://modelcontextprotocol.io)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%2B-blue.svg)](https://postgresql.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A secure, modular multi-agent system for natural language SQL analysis using Model Context Protocol (MCP) architecture. Features enhanced security through process isolation, dynamic database discovery, interactive chart generation, and schema-per-tenant architecture. Built with FastAPI, Next.js, and powered by OpenAI GPT-4o.
+A comprehensive AI-powered platform for mutual fund analysis and investment research. Features natural language querying of 6M+ mutual fund records, advanced risk analytics, rolling returns analysis, and interactive visualizations. Built with MCP architecture for enhanced security, FastAPI backend, Next.js frontend, and powered by OpenAI GPT-4o.
 
 ## 🎯 Overview
 
-This system provides an intelligent SQL agent that can:
-- **Discover databases dynamically** across multiple PostgreSQL instances
-- **Process natural language queries** and convert them to SQL
-- **Generate interactive visualizations** using Plotly
-- **Handle file uploads** with multi-sheet Excel/CSV processing
-- **Maintain user isolation** through schema-per-tenant architecture
-- **Provide real-time responses** with streaming support
+This platform provides comprehensive mutual fund analysis capabilities through an intelligent AI agent that can:
+- **Analyze 6M+ mutual fund records** across 1,478 schemes from 10 interconnected tables
+- **Process natural language queries** about fund performance, risk metrics, and investment options
+- **Generate advanced analytics** including rolling returns, Sharpe ratios, volatility analysis, and drawdown metrics
+- **Create interactive visualizations** with automatic chart generation using Plotly
+- **Provide investment insights** with peer group comparisons and index benchmarking
+- **Support portfolio analysis** with risk-adjusted performance evaluation
+- **Maintain data security** through schema-per-tenant architecture and MCP isolation
+
+## 📊 Mutual Fund Database
+
+### Comprehensive Data Coverage
+The platform contains a complete mutual fund database with **6,078,093+ records** across **10 interconnected tables**:
+
+#### Core Fund Information (1,478 schemes)
+- **Schemes**: Complete fund details, categories, AUM, NAV, risk levels
+- **Performance Returns**: 1D to 10Y returns across all time periods
+- **BSE Trading**: Transaction capabilities, exit loads, lock-in periods
+- **SIP Configurations**: Systematic investment parameters and limits
+- **Transaction Rules**: Purchase and redemption guidelines
+
+#### Advanced Analytics (3M+ records)
+- **Historical NAV**: 3,037,708 daily NAV records (Apr 2006 - Sep 2025)
+- **Historical Returns**: 3,036,230 records with daily and rolling returns
+  - 88% coverage for 1-year rolling returns
+  - 69% coverage for 3-year rolling returns  
+  - 55% coverage for 5-year rolling returns
+- **Risk Metrics**: 4,155+ comprehensive risk analysis records
+  - Volatility, maximum drawdown, Value at Risk (VaR)
+  - Sharpe and Sortino ratios with 6% risk-free rate
+  - Beta/Alpha analysis vs peer groups and index benchmarks
+  - Skewness, kurtosis, and distribution analysis
+
+### Fund Categories Covered
+- **Equity Funds**: Large Cap, Mid Cap, Small Cap, Multi Cap, Sectoral
+- **Debt Funds**: Liquid, Ultra Short, Short Duration, Medium Duration, Long Duration
+- **Hybrid Funds**: Conservative, Balanced, Aggressive, Dynamic Asset Allocation
+- **Solution Oriented**: ELSS, Retirement Funds, Children's Funds
+- **Other Schemes**: Index Funds, ETFs, FoFs, International Funds
 
 ## 🏗️ MCP Architecture
 
@@ -74,13 +107,23 @@ The system now uses **Model Context Protocol (MCP)** to isolate AI agents into s
 - ✅ **Real-time Streaming** - Live query results and status updates
 - ✅ **Google OAuth Integration** - Secure authentication with Google accounts
 
-### Advanced Features
-- **Financial Analysis** - Specialized mutual fund and portfolio analysis
-- **Chart Generation** - Automatic visualization based on query context
-- **Background Processing** - Celery-based task queue for file uploads
-- **Session Management** - Conversation history and context preservation
-- **Health Monitoring** - Comprehensive system health checks
-- **Admin Dashboard** - System statistics and management tools
+### 🚀 Advanced Mutual Fund Analytics
+- **Performance Analysis** - Rolling returns, absolute returns, and benchmark comparisons
+- **Risk Assessment** - Volatility, drawdown, VaR, and risk-adjusted metrics
+- **Peer Comparison** - Category-wise performance and risk analysis
+- **Index Benchmarking** - Alpha/Beta analysis against appropriate index proxies
+- **Portfolio Construction** - Multi-factor fund selection and diversification analysis
+- **SIP Analysis** - Systematic investment planning and optimization
+- **Market Timing** - Historical performance during different market cycles
+- **Fund Screening** - Advanced filtering by performance, risk, and investment criteria
+
+### 📈 Investment Research Capabilities
+- **Natural Language Queries** - "Show me top performing large cap funds with low volatility"
+- **Automated Insights** - AI-generated investment recommendations and analysis
+- **Interactive Visualizations** - Performance charts, risk-return scatter plots, correlation matrices
+- **Comparative Analysis** - Side-by-side fund comparisons with detailed metrics
+- **Historical Backtesting** - Performance simulation across different time periods
+- **Risk Profiling** - Comprehensive risk assessment with multiple metrics
 
 ## 📊 System Status
 
@@ -90,11 +133,12 @@ The system now uses **Model Context Protocol (MCP)** to isolate AI agents into s
 - **Production Ready** - Verified healthy with comprehensive testing
 - **Zero Feature Loss** - All capabilities maintained in simplified architecture
 
-### Database Connectivity
-- **3 Active Databases** - portfoliosql, chatfolio_db, stockdata_db
-- **Schema-per-Tenant** - User isolation with email-based schemas
-- **Dynamic Discovery** - Automatic table and column detection
-- **Cross-Database Queries** - Query multiple databases in single request
+### Database Architecture
+- **Mutual Fund Database** - Primary database with 10 tables and 6M+ records
+- **Schema-per-Tenant** - User isolation with email-based schemas for security
+- **Optimized Indexes** - High-performance queries on large datasets
+- **Real-time Updates** - Live data from MF APIs Club and MFApi.in
+- **Cross-Table Analytics** - Complex joins across historical and current data
 
 ## 🛠️ Tech Stack
 
@@ -226,11 +270,11 @@ CREATE SCHEMA user_12345678;
 -- All user tables created in their isolated schema
 ```
 
-### Multi-Database Support
-- **portfoliosql** - Main application database
-- **chatfolio_db** - Chat and session data
-- **stockdata_db** - Financial market data
-- **Mutual_Fund_Holdings** - Mutual fund portfolio data
+### Database Schema Details
+- **mutual_fund** - Comprehensive mutual fund database with 10 interconnected tables
+- **portfoliosql** - User portfolio and application data
+- **Schema Isolation** - Each user gets dedicated schema for data privacy
+- **Data Sources** - MF APIs Club, MFApi.in, and AMFI official data
 
 ## 📈 Chart Generation
 
@@ -245,12 +289,28 @@ The system automatically generates charts when queries contain visualization key
 - **Scatter Plots** - Correlation analysis
 - **Tables** - Structured data display
 
-### Example Queries
+### Example Mutual Fund Queries
 ```
-"Create a chart of sales by region"
-"Show me a line graph of portfolio performance over time"
-"Visualize the top 10 mutual funds by AUM"
-"Display a pie chart of asset allocation"
+"Show me top 10 large cap funds with highest 5-year returns"
+"Find debt funds with lowest volatility and no exit load"
+"Compare Sharpe ratios of mid cap vs small cap funds"
+"Which ELSS funds have best risk-adjusted returns?"
+"Show rolling returns chart for top performing hybrid funds"
+"Find funds that outperformed during 2020 market crash"
+"Display correlation matrix of top 5 equity fund categories"
+"Which SIP options are available for funds under ₹1000 minimum?"
+```
+
+### Advanced Analytics Queries
+```
+"Calculate portfolio diversification using correlation analysis"
+"Show maximum drawdown comparison across fund categories"
+"Find funds with consistent performance over multiple market cycles"
+"Analyze beta and alpha of funds vs their category benchmarks"
+"Display Value at Risk (VaR) for high-risk equity funds"
+"Compare Sortino ratios for downside risk assessment"
+"Show funds with best risk-return profile using Sharpe ratios"
+"Identify funds with lowest tail risk and stable returns"
 ```
 
 ## 🔧 Configuration
@@ -327,19 +387,26 @@ docker-compose up --build
 # - Redis: localhost:6379
 ```
 
-## 📊 Performance & Monitoring
+## 📊 Performance & Analytics Features
 
-### System Health
-- **Health Endpoint**: `/health` provides comprehensive system status
-- **Database Connectivity**: Monitors all database connections
-- **Agent Status**: Tracks active agents and their performance
-- **Memory Usage**: Monitors system resource utilization
+### Query Performance
+- **Optimized Indexes** - Fast queries on 6M+ records with sub-second response times
+- **Intelligent Caching** - Agent and query result caching for improved performance
+- **Parallel Processing** - Concurrent analysis across multiple fund categories
+- **Smart Query Routing** - Automatic table selection based on query context
 
-### Optimization Features
-- **Agent Caching** - Reuse agents per user for performance
-- **Connection Pooling** - Efficient database connection management
-- **Query Optimization** - Intelligent SQL generation and execution
-- **Background Processing** - Non-blocking file upload processing
+### Advanced Analytics Engine
+- **Rolling Returns Calculation** - 1Y, 3Y, 5Y rolling performance analysis
+- **Risk Metrics Computation** - Real-time volatility, drawdown, and VaR calculations
+- **Benchmark Analysis** - Automated peer group and index comparisons
+- **Statistical Analysis** - Correlation, regression, and distribution analysis
+- **Performance Attribution** - Factor-based return decomposition
+
+### Data Quality & Coverage
+- **Historical Depth** - 19+ years of NAV data (April 2006 onwards)
+- **Data Completeness** - 88% coverage for 1Y rolling returns across all schemes
+- **Real-time Updates** - Live data integration from multiple sources
+- **Data Validation** - Automated quality checks and anomaly detection
 
 ## 🔍 Troubleshooting
 
@@ -378,6 +445,26 @@ curl http://localhost:8001/health
 curl http://localhost:8001/discovery/summary
 ```
 
+## 🎯 Use Cases
+
+### For Individual Investors
+- **Fund Research** - Comprehensive analysis before investment decisions
+- **Portfolio Review** - Regular performance and risk assessment
+- **SIP Planning** - Optimal systematic investment strategies
+- **Risk Profiling** - Understanding fund risk characteristics
+
+### For Financial Advisors
+- **Client Recommendations** - Data-driven fund selection and advice
+- **Portfolio Construction** - Diversified portfolio building with risk management
+- **Performance Reporting** - Detailed client portfolio analysis and reporting
+- **Market Research** - Staying updated with fund performance trends
+
+### For Institutional Users
+- **Due Diligence** - Comprehensive fund analysis for institutional investments
+- **Benchmark Analysis** - Performance comparison against various benchmarks
+- **Risk Management** - Portfolio risk assessment and monitoring
+- **Research & Analytics** - Advanced quantitative analysis and insights
+
 ## 🤝 Contributing
 
 ### Development Workflow
@@ -391,6 +478,7 @@ curl http://localhost:8001/discovery/summary
 - **Python**: Follow PEP 8 guidelines
 - **TypeScript**: Use ESLint configuration
 - **Documentation**: Update README for new features
+- **Database**: Follow PostgreSQL best practices for schema design
 
 ## 📝 License
 
@@ -398,11 +486,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- **OpenAI** - GPT-4o language model
-- **LangChain** - Agent orchestration framework
-- **FastAPI** - Modern Python web framework
-- **Next.js** - React application framework
-- **Plotly** - Interactive visualization library
+- **MF APIs Club** - Comprehensive mutual fund data source
+- **MFApi.in** - Additional mutual fund data and APIs
+- **AMFI** - Official mutual fund industry data
+- **OpenAI** - GPT-4o language model for natural language processing
+- **LangChain** - Agent orchestration and SQL generation framework
+- **FastAPI** - Modern Python web framework for high-performance APIs
+- **Next.js** - React application framework for responsive frontend
+- **Plotly** - Interactive visualization library for financial charts
+- **PostgreSQL** - Robust database system for handling large datasets
 
 ## 📞 Support
 

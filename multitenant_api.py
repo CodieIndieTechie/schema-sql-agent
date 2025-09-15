@@ -64,6 +64,7 @@ class UserSessionResponse(BaseModel):
 class QueryRequest(BaseModel):
     query: str
     user_id: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class QueryResponse(BaseModel):
@@ -577,25 +578,29 @@ async def query_database_no_auth(request: QueryRequest):
         
         # Use direct SQL agent for query processing
         try:
-            # Create database URI for portfoliosql
-            from settings import get_portfoliosql_connection
-            engine = get_portfoliosql_connection()
-            db_uri = str(engine.url)
+            # Use Agent Orchestrator for graph-based coordination
+            from services.agent_orchestrator import AgentOrchestrator
+            orchestrator = AgentOrchestrator()
             
-            # Create SQL agent with comprehensive discovery for testing
-            agent_with_history = create_multitenant_sql_agent(db_uri, schema_name="anonymous_schema")
+            # Generate unique session ID for each user session to enable memory
+            session_id = request.session_id or f"session_{uuid.uuid4().hex[:12]}"
             
-            # Execute query
-            result = agent_with_history.invoke({
-                "input": request.query
-            }, config={"configurable": {"session_id": "anonymous_session"}})
+            # Execute query with graph-based agent coordination
+            result = await orchestrator.process_query(
+                query=request.query,
+                user_email=anonymous_email,
+                session_id=session_id
+            )
             
             return QueryResponse(
-                response=result.get("output", "No response generated"),
+                response=result.get("sql_response", result.get("response", "No response generated")),
                 user_id=anonymous_email,
                 schema="anonymous_schema", 
-                success=True,
-                session_id="anonymous_session"
+                success=result.get("success", True),
+                error=result.get("error"),
+                chart_file=result.get("chart_file"),
+                chart_type=result.get("chart_type"),
+                session_id=session_id
             )
             
         except Exception as agent_error:

@@ -188,6 +188,119 @@ class DatabaseDiscoveryService:
             logger.error(f"❌ Error getting columns for {db_name}.{schema_name}.{table_name}: {e}")
             return []
     
+    def get_table_relationships(self, db_name: str, schema_name: str, table_name: str) -> List[Dict[str, Any]]:
+        """Get foreign key relationships for a specific table."""
+        try:
+            engine = self.get_database_connection(db_name)
+            
+            query = """
+                SELECT 
+                    kcu.column_name,
+                    ccu.table_name AS foreign_table_name,
+                    ccu.column_name AS foreign_column_name,
+                    tc.constraint_name
+                FROM 
+                    information_schema.table_constraints AS tc 
+                    JOIN information_schema.key_column_usage AS kcu
+                      ON tc.constraint_name = kcu.constraint_name
+                      AND tc.table_schema = kcu.table_schema
+                    JOIN information_schema.constraint_column_usage AS ccu
+                      ON ccu.constraint_name = tc.constraint_name
+                      AND ccu.table_schema = tc.table_schema
+                WHERE tc.constraint_type = 'FOREIGN KEY' 
+                  AND tc.table_schema = :schema_name
+                  AND tc.table_name = :table_name;
+            """
+            
+            with engine.connect() as conn:
+                result = conn.execute(text(query), {
+                    "schema_name": schema_name,
+                    "table_name": table_name
+                })
+                
+                relationships = []
+                for row in result.fetchall():
+                    relationships.append({
+                        'column': row[0],
+                        'references_table': row[1],
+                        'references_column': row[2],
+                        'constraint_name': row[3]
+                    })
+            
+            return relationships
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting relationships for {db_name}.{schema_name}.{table_name}: {e}")
+            return []
+    
+    def get_table_indexes(self, db_name: str, schema_name: str, table_name: str) -> List[Dict[str, Any]]:
+        """Get index information for a specific table."""
+        try:
+            engine = self.get_database_connection(db_name)
+            
+            query = """
+                SELECT 
+                    i.indexname,
+                    i.indexdef,
+                    CASE WHEN i.indexdef LIKE '%UNIQUE%' THEN true ELSE false END as is_unique
+                FROM pg_indexes i
+                WHERE i.schemaname = :schema_name
+                  AND i.tablename = :table_name
+                  AND i.indexname NOT LIKE '%_pkey';
+            """
+            
+            with engine.connect() as conn:
+                result = conn.execute(text(query), {
+                    "schema_name": schema_name,
+                    "table_name": table_name
+                })
+                
+                indexes = []
+                for row in result.fetchall():
+                    indexes.append({
+                        'name': row[0],
+                        'definition': row[1],
+                        'is_unique': row[2]
+                    })
+            
+            return indexes
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting indexes for {db_name}.{schema_name}.{table_name}: {e}")
+            return []
+    
+    def get_table_row_count(self, db_name: str, schema_name: str, table_name: str) -> int:
+        """Get approximate row count for a table."""
+        try:
+            engine = self.get_database_connection(db_name)
+            
+            # Use pg_stat_user_tables for approximate count (faster for large tables)
+            query = """
+                SELECT COALESCE(n_tup_ins - n_tup_del, 0) as approx_count
+                FROM pg_stat_user_tables 
+                WHERE schemaname = :schema_name 
+                  AND relname = :table_name;
+            """
+            
+            with engine.connect() as conn:
+                result = conn.execute(text(query), {
+                    "schema_name": schema_name,
+                    "table_name": table_name
+                })
+                
+                row = result.fetchone()
+                if row and row[0] is not None:
+                    return int(row[0])
+                
+                # Fallback to exact count for smaller tables or if stats not available
+                exact_query = f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"'
+                result = conn.execute(text(exact_query))
+                return int(result.fetchone()[0])
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting row count for {db_name}.{schema_name}.{table_name}: {e}")
+            return 0
+    
     def get_comprehensive_database_info(self, include_columns: bool = True, 
                                       max_tables_per_schema: int = 50) -> Dict[str, Any]:
         """
@@ -254,13 +367,30 @@ class DatabaseDiscoveryService:
                                     'column_count': table_info['column_count']
                                 }
                                 
-                                # Include column details if requested
+                                # Include detailed information if requested
                                 if include_columns:
                                     try:
                                         columns = self.get_table_columns(
                                             db_name, schema_name, table_info['name']
                                         )
                                         table_detail['columns'] = columns
+                                        
+                                        # Add relationships and indexes for mutual fund database
+                                        if db_name == 'mutual_fund':
+                                            relationships = self.get_table_relationships(
+                                                db_name, schema_name, table_info['name']
+                                            )
+                                            indexes = self.get_table_indexes(
+                                                db_name, schema_name, table_info['name']
+                                            )
+                                            row_count = self.get_table_row_count(
+                                                db_name, schema_name, table_info['name']
+                                            )
+                                            
+                                            table_detail['relationships'] = relationships
+                                            table_detail['indexes'] = indexes
+                                            table_detail['row_count'] = row_count
+                                            
                                     except Exception as e:
                                         logger.error(f"❌ Error getting columns for {table_info['name']}: {e}")
                                         table_detail['columns'] = []
@@ -320,14 +450,18 @@ class DatabaseDiscoveryService:
             available_databases = self.list_available_databases()
             logger.info(f"📊 Found {len(available_databases)} databases: {available_databases}")
             
+            # Determine current database based on available databases
+            current_db = 'mutual_fund' if 'mutual_fund' in available_databases else settings.portfoliosql_db_name
+            
             # Build user-specific info showing all databases
             user_db_info = {
                 'databases': [],
-                'current_database': settings.portfoliosql_db_name,  # Default to portfoliosql
+                'current_database': current_db,
                 'current_schema': user_schema,
                 'user_schema': user_schema,
                 'user_email': user_email,
-                'primary_database': settings.portfoliosql_db_name  # For backward compatibility
+                'primary_database': settings.portfoliosql_db_name,  # For backward compatibility
+                'mutual_fund_available': 'mutual_fund' in available_databases
             }
             
             # Process each database
@@ -376,6 +510,19 @@ class DatabaseDiscoveryService:
                                     'column_count': table_info['column_count'],
                                     'columns': self.get_table_columns(db_name, schema_name, table_info['name'])
                                 }
+                                
+                                # Add enhanced info for mutual fund database
+                                if db_name == 'mutual_fund':
+                                    table_detail['relationships'] = self.get_table_relationships(
+                                        db_name, schema_name, table_info['name']
+                                    )
+                                    table_detail['indexes'] = self.get_table_indexes(
+                                        db_name, schema_name, table_info['name']
+                                    )
+                                    table_detail['row_count'] = self.get_table_row_count(
+                                        db_name, schema_name, table_info['name']
+                                    )
+                                
                                 schema_info['tables'].append(table_detail)
                         else:
                             # Just get table names for other schemas (for context)

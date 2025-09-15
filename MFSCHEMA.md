@@ -2,59 +2,73 @@
 
 ## Overview
 
-The `mutual_fund` PostgreSQL database contains comprehensive mutual fund data from MF APIs Club with 8 interconnected tables storing 14,562+ records across 1,487 mutual fund schemes.
+The `mutual_fund` PostgreSQL database contains comprehensive mutual fund data from MFAPIs Club with 6 interconnected tables storing 6.3M+ records across 1,487 mutual fund schemes.
 
-### Database Statistics
-- **Total Schemes**: 1,478
-- **Performance Records**: 1,486 
-- **BSE Trading Details**: 2,889
-- **SIP Configurations**: 3,961
-- **Transaction Configs**: 5,778
-- **Historical NAV Records**: 3,037,708
-- **Historical Returns Records**: 3,036,230
-- **Historical Risk Records**: 4,155+ (includes Sharpe ratios, beta/alpha metrics)
+### Database Statistics (Updated: September 2025)
+- **Total Schemes**: 1,487 (100% coverage)
+- **Historical NAV Records**: 3,147,643 (19+ years: 2006-2025)
+- **Historical Returns Records**: 3,146,156 (daily & rolling returns)
+- **Historical Risk Records**: 1,308 (comprehensive risk metrics)
+- **Current Holdings Records**: 2,105 (portfolio compositions)
+- **BSE Trading Details**: 1,487 (100% coverage)
+- **Total Database Size**: ~2.8 GB
+- **Total Records Processed**: 6,298,081
 
-### Data Source
-- **API**: https://app.mfapis.club/api/v1/scheme/list
-- **Update Frequency**: Real-time via API
-- **Coverage**: All AMFI registered mutual funds
+### Data Sources
+- **Primary API**: https://app.mfapis.club/api/v1 (MFAPIs Club)
+- **Backup NAV**: https://api.mfapi.in (fallback)
+- **Update Frequency**: Real-time via modular ETL pipeline
+- **Coverage**: All 1,487 AMFI registered mutual funds
+- **Historical Depth**: 19+ years (April 2006 - September 2025)
 
 ---
 
 ## Table Relationships
 
 ```
-schemes (1:1) ← scheme_returns
-schemes (1:M) → bse_details
 schemes (1:M) → historical_nav
-schemes (1:M) → historical_returns
+schemes (1:M) → historical_returns  
 schemes (1:M) → historical_risk
-bse_details (1:M) → sip_configurations
-bse_details (1:M) → transaction_configurations
+schemes (1:M) → current_holdings
+schemes (1:1) → bse_details
 ```
+
+### Foreign Key Constraints
+- All child tables reference `schemes.id` with CASCADE options
+- Unique constraints prevent duplicate records
+- Optimized indexes for performance queries
 
 ---
 
 ## 1. SCHEMES Table
 
 **Purpose**: Core mutual fund information and metadata
+**Records**: 1,487 schemes (100% AMFI coverage)
+**Table Size**: 1,048 kB
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | TEXT (PK) | Unique scheme identifier from MF APIs Club |
-| scheme_code | TEXT (UNIQUE) | AMFI scheme code |
-| scheme_name | TEXT | Full scheme name |
-| amfi_broad | TEXT | Broad category (Equity, Debt, Hybrid, Other, Solution Oriented) |
-| amfi_sub | TEXT | Sub-category (Large Cap Fund, Liquid Fund, etc.) |
-| aum_in_lakhs | DECIMAL(15,2) | Assets Under Management in lakhs |
-| current_nav | DECIMAL(10,6) | Latest Net Asset Value |
-| risk_level | INTEGER | Risk rating 1-5 (1=lowest, 5=highest) |
-| amc_code | TEXT | Asset Management Company code |
-| amc_img_url | TEXT | AMC logo URL |
-| sip_allowed | BOOLEAN | SIP investment allowed |
-| purchase_allowed | BOOLEAN | Lump sum purchase allowed |
-| created_at | TIMESTAMP | Record creation time |
-| updated_at | TIMESTAMP | Last update time |
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | TEXT (PK) | NO | - | Unique scheme identifier from MFAPIs Club |
+| scheme_code | TEXT | YES | - | AMFI scheme code |
+| scheme_name | TEXT | NO | - | Full scheme name |
+| aum_in_lakhs | NUMERIC | YES | - | Assets Under Management in lakhs |
+| amfi_broad | TEXT | YES | - | Broad category (Equity, Debt, Hybrid, Other, Solution Oriented) |
+| amfi_sub | TEXT | YES | - | Sub-category (Large Cap Fund, Liquid Fund, etc.) |
+| isin | TEXT | YES | - | International Securities Identification Number |
+| scheme_type | TEXT | YES | - | Scheme type classification |
+| legend | TEXT | YES | - | Scheme legend/status |
+| risk_level | TEXT | YES | - | Risk level description |
+| horizon | TEXT | YES | - | Investment horizon recommendation |
+| load_months | INTEGER | YES | - | Load period in months |
+| is_recommended | BOOLEAN | YES | false | Whether scheme is recommended |
+| amc_code | TEXT | YES | - | Asset Management Company code |
+| div_reinvest | TEXT | YES | - | Dividend reinvestment option |
+| purchase_allowed | BOOLEAN | YES | true | Lump sum purchase allowed |
+
+**Indexes**:
+- `schemes_pkey` (PRIMARY KEY on id)
+- `idx_schemes_amfi_broad` (amfi_broad)
+- `idx_schemes_scheme_code` (scheme_code)
 
 ### Text-to-SQL Examples
 
@@ -110,23 +124,31 @@ ORDER BY fund_count DESC;
 
 ---
 
-## 2. SCHEME_RETURNS Table
+## 2. HISTORICAL_NAV Table
 
-**Purpose**: Performance returns across multiple time periods
+**Purpose**: Complete historical Net Asset Value data for all mutual fund schemes
+**Records**: 3,147,643 records (19+ years of data)
+**Table Size**: 1,064 MB
+**Date Range**: April 1, 2006 to September 10, 2025
 
-| Column | Type | Description |
-|--------|------|-------------|
-| scheme_id | TEXT (PK, FK) | References schemes.id |
-| days1 | DECIMAL(8,4) | 1-day return percentage |
-| mths1 | DECIMAL(8,4) | 1-month return percentage |
-| mths6 | DECIMAL(8,4) | 6-month return percentage |
-| yrs1 | DECIMAL(8,4) | 1-year return percentage |
-| yrs2 | DECIMAL(8,4) | 2-year return percentage |
-| yrs3 | DECIMAL(8,4) | 3-year return percentage |
-| yrs5 | DECIMAL(8,4) | 5-year return percentage |
-| yrs7 | DECIMAL(8,4) | 7-year return percentage |
-| yrs10 | DECIMAL(8,4) | 10-year return percentage |
-| created_at | TIMESTAMP | Record creation time |
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | INTEGER (PK) | NO | nextval() | Auto-increment primary key |
+| scheme_id | TEXT (FK) | NO | - | References schemes.id |
+| scheme_code | TEXT | NO | - | AMFI scheme code for reference |
+| nav_date | DATE | NO | - | Date of NAV record |
+| nav_value | NUMERIC | NO | - | Net Asset Value on the date |
+| data_source | TEXT | NO | 'mfapis_club' | Data source identifier |
+| created_at | TIMESTAMP | YES | CURRENT_TIMESTAMP | Record creation time |
+
+**Constraints**:
+- `historical_nav_pkey` (PRIMARY KEY on id)
+- `historical_nav_scheme_id_nav_date_key` (UNIQUE on scheme_id, nav_date)
+- `historical_nav_scheme_id_fkey` (FOREIGN KEY to schemes.id)
+
+**Indexes**: Optimized for date-range queries and scheme lookups
+- `idx_historical_nav_scheme_date` (scheme_id, nav_date DESC)
+- `idx_historical_nav_date` (nav_date DESC)
 
 ### Text-to-SQL Examples
 
@@ -190,24 +212,39 @@ ORDER BY avg_5yr DESC NULLS LAST;
 
 ---
 
-## 3. BSE_DETAILS Table
+## 3. HISTORICAL_RETURNS Table
 
-**Purpose**: BSE trading information and transaction capabilities
+**Purpose**: Comprehensive daily returns and rolling returns analysis for all mutual fund schemes
+**Records**: 3,146,156 records (daily & periodic returns)
+**Table Size**: 1,033 MB
+**Coverage**: 100% of schemes with returns data
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | SERIAL (PK) | Auto-increment primary key |
-| scheme_id | TEXT (FK) | References schemes.id |
-| bse_code | TEXT | BSE trading code |
-| sip_flag | BOOLEAN | SIP transactions allowed |
-| stp_flag | BOOLEAN | STP (Systematic Transfer Plan) allowed |
-| swp_flag | BOOLEAN | SWP (Systematic Withdrawal Plan) allowed |
-| switch_flag | BOOLEAN | Fund switching allowed |
-| lock_in_flag | BOOLEAN | Lock-in period applicable |
-| lock_in_period_months | INTEGER | Lock-in duration in months |
-| exit_load_flag | BOOLEAN | Exit load applicable |
-| exit_load_message | TEXT | Detailed exit load conditions |
-| created_at | TIMESTAMP | Record creation time |
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | INTEGER (PK) | NO | nextval() | Auto-increment primary key |
+| scheme_id | TEXT (FK) | NO | - | References schemes.id |
+| scheme_code | TEXT | NO | - | AMFI scheme code for reference |
+| return_date | DATE | NO | - | Date of the return calculation |
+| daily_return | NUMERIC | YES | - | Daily return percentage: (NAV_current / NAV_previous - 1) |
+| return_1d | NUMERIC | YES | - | 1-day return percentage |
+| return_1w | NUMERIC | YES | - | 1-week return percentage |
+| return_1m | NUMERIC | YES | - | 1-month return percentage |
+| return_3m | NUMERIC | YES | - | 3-month return percentage |
+| return_6m | NUMERIC | YES | - | 6-month return percentage |
+| return_1y | NUMERIC | YES | - | 1-year return percentage |
+| return_3y | NUMERIC | YES | - | 3-year return percentage |
+| return_5y | NUMERIC | YES | - | 5-year return percentage |
+| rolling_return_1y | NUMERIC | YES | - | 1-year rolling return (252 trading days lookback) |
+| rolling_return_3y | NUMERIC | YES | - | 3-year rolling return (756 trading days lookback) |
+| created_at | TIMESTAMP | YES | CURRENT_TIMESTAMP | Record creation time |
+
+**Constraints**:
+- `historical_returns_pkey` (PRIMARY KEY on id)
+- `historical_returns_scheme_id_return_date_key` (UNIQUE on scheme_id, return_date)
+- `historical_returns_scheme_id_fkey` (FOREIGN KEY to schemes.id)
+
+**Indexes**: Optimized for performance analysis and time-series queries
+- `idx_historical_returns_scheme_date` (scheme_id, return_date DESC)
 
 ### Text-to-SQL Examples
 
@@ -267,9 +304,284 @@ ORDER BY total_options DESC;
 
 ---
 
-## 5. SIP_CONFIGURATIONS Table
+## 4. HISTORICAL_RISK Table
 
-**Purpose**: Systematic Investment Plan parameters and limits
+**Purpose**: Comprehensive risk metrics and volatility analysis for mutual fund schemes
+**Records**: 1,308 records (88% coverage for 1Y+ periods)
+**Table Size**: 1,112 kB
+**Risk Coverage by Period**:
+- 1W-1Y: 1,308/1,487 schemes (88.0%)
+- 3Y: 982/1,487 schemes (66.0%)
+- 5Y: 785/1,487 schemes (52.8%)
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | INTEGER (PK) | NO | nextval() | Auto-increment primary key |
+| scheme_id | TEXT (FK) | NO | - | References schemes.id |
+| scheme_code | TEXT | NO | - | AMFI scheme code for reference |
+| risk_date | DATE | NO | - | Date of risk calculation |
+| volatility_1w | NUMERIC | YES | - | 1-week annualized volatility |
+| volatility_1m | NUMERIC | YES | - | 1-month annualized volatility |
+| volatility_3m | NUMERIC | YES | - | 3-month annualized volatility |
+| volatility_6m | NUMERIC | YES | - | 6-month annualized volatility |
+| volatility_1y | NUMERIC | YES | - | 1-year annualized volatility |
+| volatility_3y | NUMERIC | YES | - | 3-year annualized volatility |
+| volatility_5y | NUMERIC | YES | - | 5-year annualized volatility |
+| sharpe_ratio_1w | NUMERIC | YES | - | 1-week Sharpe ratio |
+| sharpe_ratio_1m | NUMERIC | YES | - | 1-month Sharpe ratio |
+| sharpe_ratio_3m | NUMERIC | YES | - | 3-month Sharpe ratio |
+| sharpe_ratio_6m | NUMERIC | YES | - | 6-month Sharpe ratio |
+| sharpe_ratio_1y | NUMERIC | YES | - | 1-year Sharpe ratio |
+| sharpe_ratio_3y | NUMERIC | YES | - | 3-year Sharpe ratio |
+| sharpe_ratio_5y | NUMERIC | YES | - | 5-year Sharpe ratio |
+| sortino_ratio_1w | NUMERIC | YES | - | 1-week Sortino ratio |
+| sortino_ratio_1m | NUMERIC | YES | - | 1-month Sortino ratio |
+| sortino_ratio_3m | NUMERIC | YES | - | 3-month Sortino ratio |
+| sortino_ratio_6m | NUMERIC | YES | - | 6-month Sortino ratio |
+| sortino_ratio_1y | NUMERIC | YES | - | 1-year Sortino ratio |
+| sortino_ratio_3y | NUMERIC | YES | - | 3-year Sortino ratio |
+| sortino_ratio_5y | NUMERIC | YES | - | 5-year Sortino ratio |
+| beta_1w | NUMERIC | YES | - | 1-week beta (market correlation) |
+| beta_1m | NUMERIC | YES | - | 1-month beta |
+| beta_3m | NUMERIC | YES | - | 3-month beta |
+| beta_6m | NUMERIC | YES | - | 6-month beta |
+| beta_1y | NUMERIC | YES | - | 1-year beta |
+| beta_3y | NUMERIC | YES | - | 3-year beta |
+| beta_5y | NUMERIC | YES | - | 5-year beta |
+| alpha_1w | NUMERIC | YES | - | 1-week alpha (excess return) |
+| alpha_1m | NUMERIC | YES | - | 1-month alpha |
+| alpha_3m | NUMERIC | YES | - | 3-month alpha |
+| alpha_6m | NUMERIC | YES | - | 6-month alpha |
+| alpha_1y | NUMERIC | YES | - | 1-year alpha |
+| alpha_3y | NUMERIC | YES | - | 3-year alpha |
+| alpha_5y | NUMERIC | YES | - | 5-year alpha |
+| maximum_drawdown_1w | NUMERIC | YES | - | 1-week maximum drawdown |
+| maximum_drawdown_1m | NUMERIC | YES | - | 1-month maximum drawdown |
+| maximum_drawdown_3m | NUMERIC | YES | - | 3-month maximum drawdown |
+| maximum_drawdown_6m | NUMERIC | YES | - | 6-month maximum drawdown |
+| maximum_drawdown_1y | NUMERIC | YES | - | 1-year maximum drawdown |
+| maximum_drawdown_3y | NUMERIC | YES | - | 3-year maximum drawdown |
+| maximum_drawdown_5y | NUMERIC | YES | - | 5-year maximum drawdown |
+| var_95_1y | NUMERIC | YES | - | 1-year 95% Value at Risk |
+| up_capture_ratio_3y | NUMERIC | YES | - | 3-year up-capture ratio vs benchmark |
+| down_capture_ratio_3y | NUMERIC | YES | - | 3-year down-capture ratio vs benchmark |
+| created_at | TIMESTAMP | YES | CURRENT_TIMESTAMP | Record creation time |
+
+**Constraints**:
+- `historical_risk_pkey` (PRIMARY KEY on id)
+- `historical_risk_scheme_id_unique` (UNIQUE on scheme_id)
+- `historical_risk_scheme_id_fkey` (FOREIGN KEY to schemes.id)
+
+**Indexes**:
+- `idx_historical_risk_scheme_date` (scheme_id, risk_date DESC)
+
+**Note**: 1D risk metrics are mathematically undefined (standard deviation of single value) and correctly excluded from calculations.
+
+---
+
+## 5. CURRENT_HOLDINGS Table
+
+**Purpose**: Current portfolio holdings and asset allocation for mutual fund schemes
+**Records**: 2,105 records (portfolio compositions)
+**Table Size**: 744 kB
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | INTEGER (PK) | NO | nextval() | Auto-increment primary key |
+| scheme_id | TEXT (FK) | NO | - | References schemes.id |
+| scheme_code | TEXT | NO | - | AMFI scheme code for reference |
+| company_name | TEXT | NO | - | Name of the holding company/security |
+| percentage_holding | NUMERIC | NO | - | Percentage of portfolio allocated to this holding |
+| market_value | NUMERIC | YES | - | Market value of the holding |
+| holding_date | DATE | NO | - | Date of the holdings data |
+| investment_type | TEXT | YES | - | Type of investment (equity, debt, etc.) |
+| sector | TEXT | YES | - | Sector classification of the holding |
+| created_at | TIMESTAMP | YES | CURRENT_TIMESTAMP | Record creation time |
+
+**Constraints**:
+- `current_holdings_pkey` (PRIMARY KEY on id)
+- `current_holdings_scheme_id_company_name_holding_date_key` (UNIQUE on scheme_id, company_name, holding_date)
+- `current_holdings_scheme_id_fkey` (FOREIGN KEY to schemes.id)
+
+**Indexes**:
+- `idx_current_holdings_scheme_date` (scheme_id, holding_date DESC)
+- `idx_current_holdings_company` (company_name)
+
+---
+
+## 6. BSE_DETAILS Table
+
+**Purpose**: BSE trading information and transaction capabilities
+**Records**: 1,487 records (100% coverage)
+**Table Size**: 1,048 kB
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | INTEGER (PK) | NO | nextval() | Auto-increment primary key |
+| scheme_id | TEXT (FK) | NO | - | References schemes.id |
+| scheme_code | TEXT | NO | - | AMFI scheme code |
+| bse_code | TEXT | YES | - | BSE trading code |
+| bse_scheme_code | TEXT | YES | - | BSE scheme code |
+| minimum_amount | NUMERIC | YES | - | Minimum investment amount |
+| maximum_amount | NUMERIC | YES | - | Maximum investment amount |
+| multiplier | NUMERIC | YES | 1 | Investment amount multiplier |
+| purchase_allowed | BOOLEAN | YES | false | Purchase transactions allowed |
+| redemption_allowed | BOOLEAN | YES | false | Redemption transactions allowed |
+| sip_allowed | BOOLEAN | YES | false | SIP transactions allowed |
+| stp_allowed | BOOLEAN | YES | false | STP (Systematic Transfer Plan) allowed |
+| swp_allowed | BOOLEAN | YES | false | SWP (Systematic Withdrawal Plan) allowed |
+| switch_allowed | BOOLEAN | YES | false | Fund switching allowed |
+| exit_load | TEXT | YES | - | Exit load description |
+| exit_load_days | INTEGER | YES | - | Exit load applicable days |
+| lock_in_period | INTEGER | YES | - | Lock-in period in days |
+| data_source | TEXT | YES | 'mfapis_club' | Data source identifier |
+| created_at | TIMESTAMP | YES | CURRENT_TIMESTAMP | Record creation time |
+| updated_at | TIMESTAMP | YES | CURRENT_TIMESTAMP | Last update time |
+
+**Constraints**:
+- `bse_details_pkey` (PRIMARY KEY on id)
+- `bse_details_scheme_id_bse_code_key` (UNIQUE on scheme_id, bse_code)
+- `bse_details_scheme_id_fkey` (FOREIGN KEY to schemes.id)
+
+**Indexes**:
+- `idx_bse_details_scheme_id` (scheme_id)
+- `idx_bse_details_bse_code` (bse_code)
+
+---
+
+## Advanced Multi-Table Queries
+
+### Portfolio Analysis Query
+```sql
+-- Complete fund analysis with risk-return metrics
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    s.aum_in_lakhs,
+    hr.return_1y,
+    hr.return_3y,
+    hr.return_5y,
+    risk.volatility_1y,
+    risk.sharpe_ratio_1y,
+    risk.maximum_drawdown_1y,
+    b.sip_allowed,
+    b.minimum_amount,
+    b.exit_load
+FROM schemes s
+LEFT JOIN historical_returns hr ON s.id = hr.scheme_id 
+    AND hr.return_date = (SELECT MAX(return_date) FROM historical_returns WHERE scheme_id = s.id)
+LEFT JOIN historical_risk risk ON s.id = risk.scheme_id
+LEFT JOIN bse_details b ON s.id = b.scheme_id
+WHERE s.amfi_broad = 'Equity'
+ORDER BY hr.return_1y DESC NULLS LAST;
+```
+
+### Holdings Analysis Query
+```sql
+-- Top holdings across fund categories
+SELECT 
+    s.amfi_broad,
+    ch.company_name,
+    COUNT(DISTINCT s.id) as funds_holding,
+    ROUND(AVG(ch.percentage_holding), 2) as avg_allocation,
+    ROUND(SUM(ch.market_value), 2) as total_market_value
+FROM current_holdings ch
+JOIN schemes s ON ch.scheme_id = s.id
+GROUP BY s.amfi_broad, ch.company_name
+HAVING COUNT(DISTINCT s.id) >= 5
+ORDER BY s.amfi_broad, total_market_value DESC;
+```
+
+### Risk-Adjusted Performance Query
+```sql
+-- Best risk-adjusted returns by category
+SELECT 
+    s.amfi_broad,
+    s.scheme_name,
+    hr.return_1y,
+    risk.volatility_1y,
+    risk.sharpe_ratio_1y,
+    risk.maximum_drawdown_1y,
+    CASE 
+        WHEN risk.maximum_drawdown_1y != 0 THEN hr.return_1y / ABS(risk.maximum_drawdown_1y)
+        ELSE NULL 
+    END as calmar_ratio
+FROM schemes s
+JOIN historical_returns hr ON s.id = hr.scheme_id
+JOIN historical_risk risk ON s.id = risk.scheme_id
+WHERE hr.return_date = (SELECT MAX(return_date) FROM historical_returns WHERE scheme_id = s.id)
+    AND risk.volatility_1y IS NOT NULL
+    AND hr.return_1y > 10
+ORDER BY risk.sharpe_ratio_1y DESC NULLS LAST
+LIMIT 20;
+```
+
+---
+
+## Database Maintenance
+
+### ETL Pipeline Commands
+```bash
+# Run complete ETL pipeline
+python orchestrator.py --all
+
+# Individual module runs
+python schemes_fetcher.py
+python nav_fetcher.py
+python holdings_fetcher.py
+python returns_calculator.py
+python risk_calculator.py
+python bse_details_extractor.py
+```
+
+### Backup Commands
+```bash
+# Full database backup
+pg_dump mutual_fund > mutual_fund_backup_$(date +%Y%m%d).sql
+
+# Schema-only backup
+pg_dump --schema-only mutual_fund > mutual_fund_schema_$(date +%Y%m%d).sql
+```
+
+### Performance Optimization
+- All foreign keys have optimized indexes
+- Frequently queried date columns are indexed with DESC order
+- UNIQUE constraints prevent duplicate records
+- Batch processing with UPSERT operations for efficiency
+- Connection pooling and transaction management
+
+---
+
+## Data Quality & Coverage
+
+### Coverage Statistics
+- **NAV Data**: 100% coverage (3.1M+ records)
+- **Returns Data**: 100% coverage (3.1M+ records)
+- **Risk Metrics**: 88% coverage for 1Y+ periods
+- **Holdings Data**: Available for schemes with portfolio disclosure
+- **BSE Trading**: 100% coverage with transaction capabilities
+
+### Data Validation
+- Foreign key constraints ensure referential integrity
+- Unique constraints prevent duplicate records
+- NOT NULL constraints on critical fields
+- Date range validation (2006-2025)
+- Numeric precision for financial calculations
+
+### Update Frequency
+- **Real-time**: Via modular ETL pipeline
+- **Historical**: 19+ years of backfilled data
+- **Incremental**: Daily updates for NAV and returns
+- **Periodic**: Risk metrics recalculated as needed
+
+---
+
+*Last Updated: September 13, 2025*
+*Database Version: PostgreSQL 13+*
+*Total Records: 6,298,081*
+*Total Size: ~2.8 GB*
+
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -1267,6 +1579,101 @@ ORDER BY volatility_stability
 LIMIT 20;
 ```
 
+### Capture Ratio Analysis Examples
+
+**1. "Find funds with best up-capture and down-capture ratios"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    s.amfi_sub,
+    ROUND(hr.up_capture_ratio_3y * 100, 2) as up_capture_pct,
+    ROUND(hr.down_capture_ratio_3y * 100, 2) as down_capture_pct,
+    ROUND((hr.up_capture_ratio_3y / hr.down_capture_ratio_3y), 2) as capture_ratio_efficiency,
+    CASE 
+        WHEN hr.up_capture_ratio_3y > 1.0 AND hr.down_capture_ratio_3y < 1.0 THEN 'Excellent'
+        WHEN hr.up_capture_ratio_3y > 0.9 AND hr.down_capture_ratio_3y < 0.9 THEN 'Good'
+        WHEN hr.up_capture_ratio_3y > 0.8 THEN 'Average'
+        ELSE 'Below Average'
+    END as capture_rating
+FROM historical_risk hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.up_capture_ratio_3y IS NOT NULL 
+    AND hr.down_capture_ratio_3y IS NOT NULL
+    AND s.amfi_broad = 'Equity'
+ORDER BY capture_ratio_efficiency DESC
+LIMIT 20;
+```
+
+**2. "Compare capture ratios across fund categories"**
+```sql
+SELECT 
+    s.amfi_sub as fund_category,
+    COUNT(*) as fund_count,
+    ROUND(AVG(hr.up_capture_ratio_3y) * 100, 2) as avg_up_capture_pct,
+    ROUND(AVG(hr.down_capture_ratio_3y) * 100, 2) as avg_down_capture_pct,
+    ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY hr.up_capture_ratio_3y) * 100, 2) as median_up_capture_pct,
+    ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY hr.down_capture_ratio_3y) * 100, 2) as median_down_capture_pct,
+    ROUND(AVG(hr.up_capture_ratio_3y / hr.down_capture_ratio_3y), 2) as avg_efficiency_ratio
+FROM historical_risk hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.up_capture_ratio_3y IS NOT NULL 
+    AND hr.down_capture_ratio_3y IS NOT NULL
+    AND s.amfi_broad IN ('Equity', 'Hybrid')
+GROUP BY s.amfi_sub
+HAVING COUNT(*) >= 5
+ORDER BY avg_efficiency_ratio DESC;
+```
+
+**3. "Identify defensive funds with low down-capture ratios"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_sub,
+    ROUND(hr.up_capture_ratio_3y * 100, 2) as up_capture_pct,
+    ROUND(hr.down_capture_ratio_3y * 100, 2) as down_capture_pct,
+    ROUND(hr.volatility_3y * 100, 2) as volatility_3y_pct,
+    ROUND(hr.sharpe_ratio_3y, 3) as sharpe_3y,
+    ROUND(hr.maximum_drawdown_3y * 100, 2) as max_drawdown_3y_pct
+FROM historical_risk hr
+JOIN schemes s ON hr.scheme_id = s.id
+WHERE hr.down_capture_ratio_3y < 0.8  -- Low down-capture (defensive)
+    AND hr.up_capture_ratio_3y > 0.7   -- Reasonable up-capture
+    AND hr.volatility_3y IS NOT NULL
+    AND s.amfi_broad = 'Equity'
+ORDER BY hr.down_capture_ratio_3y ASC, hr.up_capture_ratio_3y DESC
+LIMIT 15;
+```
+
+**4. "Comprehensive risk-return analysis with capture ratios"**
+```sql
+SELECT 
+    s.scheme_name,
+    s.amfi_broad,
+    ROUND(sr.return_3y, 2) as return_3y_pct,
+    ROUND(hr.volatility_3y * 100, 2) as volatility_3y_pct,
+    ROUND(hr.sharpe_ratio_3y, 3) as sharpe_3y,
+    ROUND(hr.up_capture_ratio_3y * 100, 2) as up_capture_pct,
+    ROUND(hr.down_capture_ratio_3y * 100, 2) as down_capture_pct,
+    ROUND(hr.maximum_drawdown_3y * 100, 2) as max_drawdown_pct,
+    CASE 
+        WHEN hr.up_capture_ratio_3y > 1.0 AND hr.down_capture_ratio_3y < 0.8 THEN 'Aggressive Upside, Defensive Downside'
+        WHEN hr.up_capture_ratio_3y > 0.9 AND hr.down_capture_ratio_3y < 0.9 THEN 'Balanced Capture'
+        WHEN hr.up_capture_ratio_3y < 0.8 AND hr.down_capture_ratio_3y < 0.8 THEN 'Conservative Both Ways'
+        WHEN hr.up_capture_ratio_3y > 1.0 AND hr.down_capture_ratio_3y > 1.0 THEN 'High Beta Style'
+        ELSE 'Mixed Performance'
+    END as capture_style
+FROM schemes s
+JOIN scheme_returns sr ON s.id = sr.scheme_id
+JOIN historical_risk hr ON s.id = hr.scheme_id
+WHERE hr.up_capture_ratio_3y IS NOT NULL 
+    AND hr.down_capture_ratio_3y IS NOT NULL
+    AND sr.return_3y IS NOT NULL
+    AND s.amfi_broad = 'Equity'
+ORDER BY (hr.up_capture_ratio_3y / hr.down_capture_ratio_3y) DESC
+LIMIT 25;
+```
+
 ---
 
 ## 10. HISTORICAL_NAV Table (Legacy Reference)
@@ -1726,6 +2133,9 @@ python3 add_var_95_column.py
 
 # Add Sharpe and Sortino ratio calculations
 python3 add_sharpe_sortino_ratios.py
+
+# Add capture ratio calculations
+python3 add_capture_ratios.py
 ```
 
 ### Backup Command

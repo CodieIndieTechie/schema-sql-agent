@@ -76,52 +76,23 @@ class AgentOrchestrator:
         try:
             self.execution_stats['total_requests'] += 1
             
-            # Step 1: Enhanced SQL Agent - Database operations and SQL execution
-            logger.info("🔍 Step 1: Enhanced SQL Agent processing...")
-            sql_response = await self._execute_sql_agent(query, user_email, session_id, discovery_mode)
+            # Use Enhanced SQL Agent with graph-based coordination
+            # The Enhanced SQL Agent now handles conditional calls to quant and formatter agents internally
+            logger.info("🔍 Enhanced SQL Agent with graph-based coordination processing...")
+            final_response = await self._execute_sql_agent(query, user_email, session_id, discovery_mode)
             
-            if not sql_response.get('success', False):
-                logger.error(f"❌ SQL Agent failed: {sql_response.get('error', 'Unknown error')}")
+            if not final_response.get('success', False):
+                logger.error(f"❌ Enhanced SQL Agent failed: {final_response.get('error', 'Unknown error')}")
                 return self._create_error_response(
                     "SQL processing failed", 
-                    sql_response.get('error', 'Database query execution failed'),
+                    final_response.get('error', 'Database query execution failed'),
                     query, request_id
                 )
             
-            logger.info("✅ Step 1 completed: SQL Agent successful")
-            
-            # Step 2: Mutual Fund Quant Agent - Quantitative analysis and calculations
-            logger.info("🧮 Step 2: Mutual Fund Quant Agent processing...")
-            quant_response = self.quant_agent.process_data(sql_response, query)
-            
-            if not quant_response.get('success', False):
-                logger.warning(f"⚠️ Quant Agent had issues: {quant_response.get('error', 'Unknown error')}")
-                # Continue with original SQL response if quant analysis fails
-                quant_response = {
-                    'success': True,
-                    'dataframe': [],
-                    'calculations': {},
-                    'insights': [],
-                    'query': query,
-                    'original_sql_data': sql_response
-                }
-            
-            logger.info("✅ Step 2 completed: Quant Agent processed")
-            
-            # Step 3: Data Formatter Agent - Visualization and output formatting
-            logger.info("📊 Step 3: Data Formatter Agent processing...")
-            final_response = self.formatter_agent.process_data(quant_response, query)
-            
-            if not final_response.get('success', False):
-                logger.warning(f"⚠️ Formatter Agent had issues: {final_response.get('error', 'Unknown error')}")
-                # Fallback to basic response
-                final_response = {
-                    'success': True,
-                    'response': sql_response.get('sql_response', 'Query processed successfully'),
-                    'query': query
-                }
-            
-            logger.info("✅ Step 3 completed: Data Formatter Agent finished")
+            logger.info("✅ Enhanced SQL Agent with graph-based coordination completed")
+            logger.info(f"📊 Chart generated: {final_response.get('chart_file', 'None')}")
+            logger.info(f"🧮 Quant analysis: {'Yes' if final_response.get('calculations') else 'No'}")
+            logger.info(f"📈 Insights generated: {len(final_response.get('insights', []))}")
             
             # Calculate execution time
             end_time = datetime.now()
@@ -139,9 +110,9 @@ class AgentOrchestrator:
                 'session_id': session_id,
                 'discovery_mode': discovery_mode,
                 'pipeline_stages': {
-                    'sql_agent': '✅ Completed',
-                    'quant_agent': '✅ Completed' if quant_response.get('success') else '⚠️ Partial',
-                    'formatter_agent': '✅ Completed' if final_response.get('success') else '⚠️ Partial'
+                    'enhanced_sql_agent': '✅ Completed',
+                    'graph_coordination': '✅ Active',
+                    'conditional_agents': '✅ Applied'
                 }
             })
             

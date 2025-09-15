@@ -64,8 +64,8 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
                   ul: ({node, ...props}) => <ul className="list-disc ml-4 mb-2" {...props} />,
                   ol: ({node, ...props}) => <ol className="list-decimal ml-4 mb-2" {...props} />,
                   li: ({node, ...props}) => <li className="mb-1" {...props} />,
-                  code: ({node, inline, ...props}) => 
-                    inline ? (
+                  code: ({node, ...props}: any) => 
+                    props.inline ? (
                       <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono text-gray-800" {...props} />
                     ) : (
                       <code className="block bg-gray-100 p-2 rounded text-xs font-mono text-gray-800 overflow-x-auto" {...props} />

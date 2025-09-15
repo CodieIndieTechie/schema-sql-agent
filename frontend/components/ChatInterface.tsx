@@ -32,6 +32,7 @@ interface UploadedFile {
 
 const ChatInterface = () => {
   const { getToken } = useAuth();
+  const [sessionId] = useState(() => `chat-session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -75,7 +76,7 @@ const ChatInterface = () => {
         },
         body: JSON.stringify({
           query: inputMessage,
-          session_id: 'chat-session-' + Date.now() // Generate unique session ID
+          session_id: sessionId // Use persistent session ID for memory
         })
       });
 

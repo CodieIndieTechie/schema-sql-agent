@@ -203,38 +203,42 @@ class DataFormatterAgent:
                                 calculations: Dict[str, Any], calc_type: Optional[str], 
                                 query: str, insights: List[str], include_chart: bool = False,
                                 include_table: bool = False) -> Dict[str, Any]:
-        """Generate a comprehensive mixed response with rich formatting, text, calculations, and visuals."""
+        """Generate a clean, formatted response without duplication."""
         try:
             response_parts = []
             
-            # Add original SQL response
-            if original_response:
-                response_parts.append(original_response)
+            # Extract clean data from original SQL response (remove SQL agent's formatting)
+            clean_data = self._extract_clean_data_from_sql_response(original_response, df)
             
-            # Add insights from quantitative analysis
-            if insights:
-                response_parts.append("\n---\n")
-                response_parts.extend(insights)
+            # Add the clean data presentation
+            if clean_data:
+                response_parts.append(clean_data)
             
-            # Add data summary if DataFrame is available
-            if df is not None and not df.empty:
-                summary = self._format_data_summary(df)
-                if summary:
-                    response_parts.append(f"\n---\n## 📊 **Data Summary**\n{summary}")
-            
-            # Generate chart if requested
+            # Add chart confirmation if chart is being generated
             chart_info = None
             if include_chart and df is not None and not df.empty:
                 chart_info = self._create_chart_with_formatter(df, calc_type, query)
                 if chart_info:
-                    response_parts.append(f"\n---\n## 📈 **Visualization**\n*Chart generated: {chart_info['chart_type']}*")
+                    # Simple chart confirmation without duplicating data
+                    chart_confirmation = self._get_chart_confirmation_text(query, chart_info['chart_type'])
+                    if chart_confirmation:
+                        response_parts.append(f"\n{chart_confirmation}")
+                    
+                    # Add chart success notification
+                    response_parts.append(f"\n📊 **Interactive Chart Generated**: {chart_info['chart_type'].title()} chart created successfully.")
+            
+            # Add insights from quantitative analysis (if any)
+            if insights:
+                response_parts.append("\n\n**Key Insights:**")
+                for insight in insights:
+                    response_parts.append(f"• {insight}")
             
             # Add data table if requested
             data_table = None
             if include_table and df is not None and not df.empty:
                 data_table = self._format_data_table(df)
                 if data_table:
-                    response_parts.append(f"\n---\n## 📋 **Data Table**\n{data_table}")
+                    response_parts.append(f"\n\n**Data Table:**\n{data_table}")
             
             # Combine all parts
             final_response = "\n".join(response_parts)
@@ -296,20 +300,93 @@ class DataFormatterAgent:
             logger.error(f"Error formatting data summary: {e}")
             return ""
     
-    def _format_data_table(self, df: pd.DataFrame) -> str:
-        """Format DataFrame as a markdown table."""
+    def _extract_clean_data_from_sql_response(self, original_response: str, df: Optional[pd.DataFrame]) -> str:
+        """Extract and clean the data presentation from SQL agent response."""
         try:
-            # Limit rows for display
-            display_df = df.head(10) if len(df) > 10 else df
+            if not original_response:
+                return ""
             
-            # Convert to markdown
-            markdown_table = display_df.to_markdown(index=False, tablefmt='grid')
+            # Split response into lines
+            lines = original_response.split('\n')
+            clean_lines = []
+            
+            # Find the main data section (usually starts with "Here are the...")
+            in_data_section = False
+            for line in lines:
+                line = line.strip()
+                
+                # Start of data section
+                if line.startswith("Here are the") or line.startswith("Here is the"):
+                    clean_lines.append(line)
+                    in_data_section = True
+                    continue
+                
+                # Stop at chart-related text or duplicate sections
+                if any(phrase in line.lower() for phrase in [
+                    "i will now plot", "here is the bar graph", "here is the chart",
+                    "the graph visually", "chart generated"
+                ]):
+                    break
+                
+                # Include numbered/bulleted data items
+                if in_data_section and (line.startswith(('1.', '2.', '3.', '4.', '5.', '-', '•')) or line == ''):
+                    clean_lines.append(line)
+                elif not in_data_section and line:
+                    # Include initial context before data section
+                    clean_lines.append(line)
+            
+            return '\n'.join(clean_lines).strip()
+            
+        except Exception as e:
+            logger.error(f"Error extracting clean data: {e}")
+            return original_response
+    
+    def _get_chart_confirmation_text(self, query: str, chart_type: str) -> str:
+        """Generate appropriate chart confirmation text based on query."""
+        try:
+            query_lower = query.lower()
+            
+            if 'plot' in query_lower or 'graph' in query_lower or 'chart' in query_lower:
+                if 'bar' in query_lower:
+                    return "I will now create a bar chart for you."
+                elif 'line' in query_lower:
+                    return "I will now create a line chart for you."
+                elif 'pie' in query_lower:
+                    return "I will now create a pie chart for you."
+                else:
+                    return f"I will now create a {chart_type} chart for you."
+            
+            return ""
+            
+        except Exception as e:
+            logger.error(f"Error generating chart confirmation: {e}")
+            return ""
+    
+    def _format_data_table(self, df: pd.DataFrame) -> str:
+        """Format DataFrame as an HTML table for proper frontend rendering."""
+        try:
+            # Remove duplicates and limit rows for display
+            clean_df = df.drop_duplicates().head(10)
+            
+            # Format numeric columns to avoid scientific notation
+            for col in clean_df.columns:
+                if clean_df[col].dtype in ['float64', 'int64']:
+                    # Format large numbers with commas and 2 decimal places
+                    clean_df[col] = clean_df[col].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) else "")
+            
+            # Convert to HTML table with styling
+            html_table = clean_df.to_html(
+                index=False, 
+                classes='table table-striped table-bordered',
+                table_id='data-table',
+                escape=False
+            )
             
             # Add note if data was truncated
             if len(df) > 10:
-                markdown_table += f"\n\n*Note: Showing first 10 rows of {len(df)} total rows*"
+                html_table += f"<p><em>Note: Showing first 10 rows of {len(df)} total rows</em></p>"
             
-            return markdown_table
+            return html_table
             
         except Exception as e:
             logger.error(f"Error formatting data table: {e}")
