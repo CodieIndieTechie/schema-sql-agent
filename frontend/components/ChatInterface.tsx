@@ -300,6 +300,20 @@ const ChatInterface = () => {
     }
   };
 
+  const handleSessionChange = (newSessionId: string) => {
+    // Clear current messages and load new session
+    setMessages([]);
+    setSessionId(newSessionId);
+    // The session will be loaded by the existing useEffect that watches sessionId
+  };
+
+  const handleNewChat = () => {
+    // Clear current messages and create a new session
+    setMessages([]);
+    clearSessionStorage();
+    // The CollapsibleNavbar will handle creating the new session
+  };
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -312,7 +326,12 @@ const ChatInterface = () => {
       <ChatHeader />
       
       <div className="flex flex-1 overflow-hidden">
-        <CollapsibleNavbar uploadedFiles={uploadedFiles} />
+        <CollapsibleNavbar 
+          uploadedFiles={uploadedFiles}
+          currentSessionId={sessionId}
+          onSessionChange={handleSessionChange}
+          onNewChat={handleNewChat}
+        />
         
         <div className="flex-1 flex flex-col min-w-0">
           {/* Messages Area */}

@@ -309,6 +309,35 @@ async def set_user_preference(
         logger.error(f"Error setting user preference: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.delete("/{session_id}")
+async def delete_session(
+    session_id: str,
+    sm: SessionManager = Depends(get_session_manager)
+):
+    """Delete a chat session and all its messages."""
+    try:
+        # Convert string to UUID
+        session_uuid = UUID(session_id)
+        
+        # First check if session exists
+        session = sm.get_session(session_uuid)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Delete the session (this will also delete messages and contexts)
+        success = sm.delete_session(session_uuid)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete session")
+        
+        return {"message": "Session deleted successfully"}
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session ID format")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.delete("/context/expired")
 async def clear_expired_contexts(
     sm: SessionManager = Depends(get_session_manager)

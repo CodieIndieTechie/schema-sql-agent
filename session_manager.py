@@ -131,6 +131,46 @@ class SessionManager:
         finally:
             session.close()
     
+    def delete_session(self, session_id: UUID) -> bool:
+        """Delete a chat session completely."""
+        session = self.db.get_session()
+        try:
+            # First delete all related data
+            self.delete_session_messages(session_id)
+            self.delete_session_contexts(session_id)
+            
+            # Then delete the session itself
+            deleted_count = session.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).delete()
+            
+            session.commit()
+            
+            if deleted_count > 0:
+                logger.info(f"✅ Deleted session {session_id}")
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            logger.error(f"❌ Error deleting session {session_id}: {e}")
+            return False
+        finally:
+            session.close()
+    
+    def get_session(self, session_id: UUID) -> Optional[ChatSession]:
+        """Get a session by ID."""
+        session = self.db.get_session()
+        try:
+            chat_session = session.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            return chat_session
+        except Exception as e:
+            logger.error(f"❌ Error getting session {session_id}: {e}")
+            return None
+        finally:
+            session.close()
+    
     # Message Management
     def add_message(
         self,
@@ -233,6 +273,23 @@ class SessionManager:
                 )
                 for msg in messages
             ]
+        finally:
+            session.close()
+    
+    def delete_session_messages(self, session_id: UUID) -> int:
+        """Delete all messages for a session."""
+        session = self.db.get_session()
+        try:
+            deleted_count = session.query(ChatHistory).filter(
+                ChatHistory.session_id == session_id
+            ).delete()
+            session.commit()
+            logger.info(f"✅ Deleted {deleted_count} messages for session {session_id}")
+            return deleted_count
+        except Exception as e:
+            session.rollback()
+            logger.error(f"❌ Error deleting messages for session {session_id}: {e}")
+            return 0
         finally:
             session.close()
     
@@ -366,6 +423,23 @@ class SessionManager:
         except Exception as e:
             session.rollback()
             logger.error(f"❌ Error clearing expired contexts: {e}")
+            return 0
+        finally:
+            session.close()
+    
+    def delete_session_contexts(self, session_id: UUID) -> int:
+        """Delete all contexts for a session."""
+        session = self.db.get_session()
+        try:
+            deleted_count = session.query(ConversationContext).filter(
+                ConversationContext.session_id == session_id
+            ).delete()
+            session.commit()
+            logger.info(f"✅ Deleted {deleted_count} contexts for session {session_id}")
+            return deleted_count
+        except Exception as e:
+            session.rollback()
+            logger.error(f"❌ Error deleting contexts for session {session_id}: {e}")
             return 0
         finally:
             session.close()
