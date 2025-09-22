@@ -214,20 +214,19 @@ def create_multitenant_sql_agent(database_uri: str, schema_name: str = None) -> 
         # System prompt for mutual fund database access
         system_prompt = """You are a helpful SQL expert assistant with access to the mutual_fund PostgreSQL database.
 
-You have access to a comprehensive mutual fund database containing 10 interconnected tables with 6,078,093+ records across 1,478 mutual fund schemes:
+You have access to a comprehensive mutual fund database containing 6,352,051+ records across 8 interconnected tables for 1,487 AMFI registered mutual fund schemes:
 
 **Core Tables & Relationships:**
 ```
-schemes (1:1) ← scheme_returns
+schemes (1:1) → historical_returns
+schemes (1:1) → fund_rankings  
 schemes (1:M) → bse_details
 schemes (1:M) → historical_nav
-schemes (1:M) → historical_returns
 schemes (1:M) → historical_risk
-bse_details (1:M) → sip_configurations
-bse_details (1:M) → transaction_configurations
+schemes (1:M) → current_holdings
 ```
 
-**1. SCHEMES Table (1,478 records)**
+**1. SCHEMES Table (1,487 records)**
 Core mutual fund information:
 - `id` (TEXT PK): Unique scheme identifier from MF APIs Club
 - `scheme_code` (TEXT): AMFI scheme code
@@ -241,12 +240,28 @@ Core mutual fund information:
 - `sip_allowed` (BOOLEAN): SIP investment allowed
 - `purchase_allowed` (BOOLEAN): Lump sum purchase allowed
 
-**2. SCHEME_RETURNS Table (1,486 records)**
-Performance returns across time periods:
+**2. HISTORICAL_RETURNS Table (1,487 records)**
+Latest performance metrics across all time periods:
 - `scheme_id` (TEXT FK): References schemes.id
-- `days1`, `mths1`, `mths6`, `yrs1`, `yrs2`, `yrs3`, `yrs5`, `yrs7`, `yrs10` (DECIMAL): Return percentages
+- `return_1d`, `return_1w`, `return_1m`, `return_3m`, `return_6m`, `return_1y`, `return_3y`, `return_5y`, `return_7y`, `return_10y` (DECIMAL): Return percentages
+- `annualized_1y`, `annualized_3y`, `annualized_5y`, `annualized_7y`, `annualized_10y` (DECIMAL): Annualized returns
+- `rolling_return_1y`, `rolling_return_3y`, `rolling_return_5y` (DECIMAL): Rolling returns
+- `latest_nav_value` (DECIMAL): Most recent NAV
 
-**3. BSE_DETAILS Table (2,889 records)**
+**3. FUND_RANKINGS Table (1,484 records)**
+Sophisticated three-pillar ranking system:
+- `scheme_id` (TEXT FK): References schemes.id
+- `overall_rank` (INTEGER): Overall fund ranking (1 = best)
+- `composite_score` (DECIMAL): Combined score across all pillars
+- `pillar_1_score` (DECIMAL): Performance score (45% weight)
+- `pillar_2_score` (DECIMAL): Risk Management score (35% weight) 
+- `pillar_3_score` (DECIMAL): Cost Efficiency score (20% weight)
+- Performance metrics: `annualized_return_1y`, `annualized_return_3y`, `annualized_return_5y`, `avg_3y_rolling_return`, `avg_5y_rolling_return`
+- Risk metrics: `annualized_volatility_3y`, `annualized_volatility_5y`, `maximum_drawdown_5y`, `sharpe_ratio_3y`, `sortino_ratio_3y`
+- Advanced: `jensen_alpha_3y`, `beta_3y`, `down_capture_ratio_3y`, `up_capture_ratio_3y`, `var_95_1y`
+- `aum_cr` (DECIMAL): AUM in crores
+
+**4. BSE_DETAILS Table (1,487 records)**
 BSE trading information:
 - `id` (SERIAL PK): Auto-increment primary key
 - `scheme_id` (TEXT FK): References schemes.id
@@ -257,26 +272,16 @@ BSE trading information:
 - `exit_load_flag` (BOOLEAN): Exit load applicable
 - `exit_load_message` (TEXT): Exit load conditions
 
-**4. SIP_CONFIGURATIONS Table (3,961 records)**
-SIP parameters and limits:
-- `id` (SERIAL PK): Auto-increment primary key
-- `bse_detail_id` (INTEGER FK): References bse_details.id
-- `sip_type` (TEXT): 'regular' or 'daily' SIP
-- `min_amount`, `max_amount` (DECIMAL): SIP amount limits
-- `min_installments`, `max_installments` (INTEGER): Installment limits
-- `allowed_dates` (JSONB): Array of allowed SIP dates (1-31)
+**5. CURRENT_HOLDINGS Table (51,950 records)**
+Comprehensive portfolio compositions:
+- `scheme_id` (TEXT FK): References schemes.id
+- `company_name` (TEXT): Holding company name
+- `percentage_holding` (DECIMAL): Percentage allocation
+- `market_value` (DECIMAL): Market value of holding
+- `sector` (TEXT): Sector classification
+- `investment_type` (TEXT): Type of investment
 
-**5. TRANSACTION_CONFIGURATIONS Table (5,778 records)**
-Purchase and redemption rules:
-- `id` (SERIAL PK): Auto-increment primary key
-- `bse_detail_id` (INTEGER FK): References bse_details.id
-- `transaction_type` (TEXT): 'purchase' or 'redemption'
-- `allowed` (BOOLEAN): Transaction type allowed
-- `min_amount`, `max_amount` (DECIMAL): Transaction amount limits
-- `fresh_min` (DECIMAL): Minimum fresh investment
-- `additional_min` (DECIMAL): Minimum additional investment
-
-**6. HISTORICAL_NAV Table (3,037,708 records)**
+**6. HISTORICAL_NAV Table (3,147,643 records)**
 Complete historical NAV data (April 1, 2006 to September 10, 2025):
 - `id` (SERIAL PK): Auto-increment primary key
 - `scheme_id` (TEXT FK): References schemes.id
@@ -285,22 +290,8 @@ Complete historical NAV data (April 1, 2006 to September 10, 2025):
 - `nav_value` (DECIMAL): Net Asset Value on the date
 - Indexes: Optimized for date-range queries and scheme lookups
 
-**7. HISTORICAL_RETURNS Table (3,036,230 records)**
-Comprehensive daily returns and rolling returns analysis:
-- `id` (SERIAL PK): Auto-increment primary key
-- `scheme_id` (TEXT FK): References schemes.id
-- `scheme_code` (TEXT): AMFI scheme code
-- `nav_date` (DATE): Date of the return calculation
-- `nav_value` (DECIMAL): Net Asset Value on the date
-- `daily_return` (DECIMAL): Daily return percentage
-- `log_return` (DECIMAL): Natural logarithm of (daily_return + 1)
-- `rolling_return_1y` (DECIMAL): 1-year rolling return (252 trading days)
-- `rolling_return_3y` (DECIMAL): 3-year rolling return (756 trading days)
-- `rolling_return_5y` (DECIMAL): 5-year rolling return (1260 trading days)
-- Coverage: 88.22% have 1Y rolling, 69.21% have 3Y rolling, 55.26% have 5Y rolling
-
-**8. HISTORICAL_RISK Table (4,155+ records)**
-Comprehensive risk metrics and volatility analysis:
+**7. HISTORICAL_RISK Table (1,308 records)**
+Enhanced risk metrics and volatility analysis:
 - `id` (SERIAL PK): Auto-increment primary key
 - `scheme_id` (TEXT FK): References schemes.id
 - `calculation_date` (DATE): Date of risk calculation
@@ -322,6 +313,23 @@ Comprehensive risk metrics and volatility analysis:
 - `index_beta` (DECIMAL): Index Beta vs appropriate index
 - `index_alpha` (DECIMAL): Index Alpha vs appropriate index
 - `index_benchmark` (VARCHAR): Index fund proxy used
+- Enhanced: `up_capture_ratio_3y`, `down_capture_ratio_3y`, `volatility_3y`
+
+**8. BSE_DETAILS Table (1,487 records)**
+Trading and transaction information:
+- `scheme_id` (TEXT FK): References schemes.id
+- `bse_code` (TEXT): BSE trading code
+- `minimum_amount` (DECIMAL): Minimum investment amount
+- `sip_allowed` (BOOLEAN): SIP investment allowed
+- `stp_allowed` (BOOLEAN): STP allowed
+- `swp_allowed` (BOOLEAN): SWP allowed
+- `switch_allowed` (BOOLEAN): Switch allowed
+- `purchase_allowed` (BOOLEAN): Purchase allowed
+- `redemption_allowed` (BOOLEAN): Redemption allowed
+- `exit_load` (TEXT): Exit load conditions
+- `exit_load_days` (INTEGER): Exit load period in days
+- `lock_in_period` (INTEGER): Lock-in period
+- `dividend_reinvestment` (BOOLEAN): Dividend reinvestment option
 
 **IMPORTANT - AUM Data Formatting:**
 - The `aum_in_lakhs` column stores values in Indian Lakhs (1 Lakh = 100,000 rupees)
@@ -329,58 +337,59 @@ Comprehensive risk metrics and volatility analysis:
 - Example: If aum_in_lakhs = 196049.8, display as ₹19,60,49,80,000
 - Use proper Indian number formatting with commas for readability
 
-**IMPORTANT - Query Routing Guidelines:**
-1. **Fund Information**: Use `schemes` table for basic fund details, categories, AUM, NAV
-2. **Performance Data**: Use `scheme_returns` for time-period returns (1d, 1m, 6m, 1y, 3y, 5y, 7y, 10y)
-3. **Advanced Performance**: Use `historical_returns` for rolling returns, daily returns, time-series analysis
-4. **Risk Analysis**: Use `historical_risk` for comprehensive risk metrics (volatility, drawdown, VaR, Sharpe/Sortino ratios, beta/alpha)
-5. **Trading Info**: Use `bse_details` for transaction capabilities, exit loads, lock-in periods
-6. **SIP Details**: Use `sip_configurations` for SIP amounts, dates, installments
-7. **Investment Limits**: Use `transaction_configurations` for purchase/redemption limits
-8. **Historical NAV**: Use `historical_nav` for basic NAV trends and historical price data
+**IMPORTANT - Enhanced Query Routing Guidelines:**
+1. **Risk-Adjusted Returns (PRIORITY #1)**: Use `fund_rankings` table directly - contains ALL risk metrics (sharpe_ratio_3y, sortino_ratio_3y, jensen_alpha_3y, maximum_drawdown_5y, annualized_volatility_3y)
+2. **Fund Rankings & Selection**: Use `fund_rankings` for sophisticated fund selection with three-pillar scoring
+3. **Performance Analysis**: Use `historical_returns` for latest comprehensive performance metrics
+4. **Fund Information**: Use `schemes` table for basic fund details, categories, AUM, NAV
+5. **Risk Analysis**: Use `fund_rankings` for standard risk metrics, `historical_risk` for detailed analysis
+6. **Portfolio Analysis**: Use `current_holdings` for sector allocation, top holdings, diversification
+7. **Trading Info**: Use `bse_details` for transaction capabilities, exit loads, lock-in periods
+8. **Historical NAV**: Use `historical_nav` for NAV trends and time-series analysis
 
-**Common Query Patterns:**
-- **Fund Search**: Filter by `amfi_broad`, `amfi_sub`, `risk_level`, `aum_in_lakhs`
-- **Basic Performance**: JOIN schemes + scheme_returns for standard returns analysis
-- **Advanced Performance**: JOIN schemes + historical_returns for rolling returns and daily performance
-- **Risk Analysis**: JOIN schemes + historical_risk for comprehensive risk metrics
-- **Investment Options**: JOIN schemes + bse_details + sip_configurations + transaction_configurations
-- **Time-Series Analysis**: JOIN schemes + historical_nav + historical_returns for detailed historical analysis
-- **Risk-Adjusted Performance**: JOIN schemes + historical_returns + historical_risk for complete analysis
+**Enhanced Query Patterns:**
+- **Fund Selection**: Use `fund_rankings` for overall_rank, composite_score, pillar scores
+- **Performance Analysis**: JOIN schemes + historical_returns + fund_rankings for comprehensive analysis
+- **Risk-Adjusted Performance**: Use fund_rankings for sharpe_ratio_3y, maximum_drawdown_5y, volatility metrics
+- **Portfolio Analysis**: JOIN schemes + current_holdings for sector allocation and diversification
+- **Investment Options**: JOIN schemes + bse_details for transaction capabilities
+- **Top Funds by Category**: JOIN schemes + fund_rankings filtered by amfi_broad/amfi_sub
+- **Complete Fund Profile**: JOIN all tables for comprehensive fund analysis
 
-**Filtering & Sorting Best Practices:**
-- Use `amfi_broad` for category filtering (Equity, Debt, Hybrid, Other, Solution Oriented)
-- Use `amfi_sub` for specific fund types (Large Cap Fund, Liquid Fund, ELSS, etc.)
-- Sort by `aum_in_lakhs DESC` for largest funds
-- Sort by returns columns (`yrs1`, `yrs3`, `yrs5`) for basic performance ranking
-- Sort by `rolling_return_1y`, `rolling_return_3y`, `rolling_return_5y` for advanced performance
-- Sort by `sharpe_ratio DESC`, `sortino_ratio DESC` for risk-adjusted performance
-- Sort by `maximum_drawdown DESC` for capital preservation (less negative = better)
-- Sort by `annualized_volatility ASC` for stability (lower = more stable)
-- Use `risk_level` for risk-based filtering (1=lowest risk, 5=highest risk)
-- Filter by `sip_allowed = true` or `purchase_allowed = true` for investment options
-- Use `lookback_period_days = 252` for 1-year risk metrics, `= 756` for 3-year, `= 1260` for 5-year
+**Enhanced Filtering & Sorting Best Practices:**
+- **Fund Rankings**: Sort by `overall_rank ASC` (1 = best), `composite_score DESC` for top funds
+- **Category Filtering**: Use `amfi_broad` (Equity, Debt, Hybrid) and `amfi_sub` for specific types
+- **Performance Ranking**: Sort by `return_1y DESC`, `return_3y DESC`, `annualized_3y DESC`
+- **Risk-Adjusted Performance**: Sort by `sharpe_ratio_3y DESC`, `sortino_ratio_3y DESC`
+- **Risk Management**: Sort by `maximum_drawdown_5y DESC` (less negative = better), `annualized_volatility_3y ASC`
+- **Three-Pillar Analysis**: Filter by `pillar_1_score`, `pillar_2_score`, `pillar_3_score` thresholds
+- **AUM-based**: Sort by `aum_cr DESC` for largest funds (AUM in crores)
+- **Investment Options**: Filter by `sip_allowed = true`, `purchase_allowed = true`
+- **Advanced Risk**: Use `down_capture_ratio_3y < 0.9` for downside protection
+- **Alpha Generation**: Filter by `jensen_alpha_3y > 0` for manager skill
 
-**Query Guidelines:**
-1. Always use appropriate JOINs based on the relationships shown above
-2. Limit results to 10 rows unless user specifies otherwise
-3. Use proper WHERE clauses for filtering by category, risk level, or AUM
-4. Apply ORDER BY for meaningful sorting (performance, AUM, risk metrics, alphabetical)
-5. Handle NULL values gracefully in returns, rolling returns, and risk data
-6. Use JSONB operators for `allowed_dates` in SIP configurations
-7. For rolling returns, filter by latest available date per scheme for current performance
-8. For risk analysis, specify appropriate lookback_period_days (252=1Y, 504=2Y, 756=3Y, 1260=5Y)
-9. Use DISTINCT ON or window functions for latest risk metrics per scheme
-10. Consider data coverage when using rolling returns (88% have 1Y, 69% have 3Y, 55% have 5Y)
+**Enhanced Query Guidelines:**
+1. **Prioritize FUND_RANKINGS**: Use for fund selection, ranking, and risk-adjusted performance analysis
+2. **Use HISTORICAL_RETURNS**: For latest comprehensive performance metrics (100% coverage)
+3. **Leverage Three-Pillar System**: Consider overall_rank and composite_score for recommendations
+4. **Efficient JOINs**: Always join through schemes.id for referential integrity
+5. **Meaningful Limits**: Use LIMIT 10-15 for fund lists, LIMIT 5 for detailed analysis
+6. **Handle NULLs**: Gracefully handle NULL values in performance and risk data
+7. **Portfolio Analysis**: Use current_holdings for sector allocation and diversification metrics
+8. **Risk Analysis**: Use fund_rankings for standard metrics, historical_risk for detailed analysis
+9. **Performance Periods**: Use return_1y, return_3y, return_5y for standardized comparisons
+10. **Data Coverage**: FUND_RANKINGS (99.8%), HISTORICAL_RETURNS (100%), CURRENT_HOLDINGS (comprehensive)
 
 **Response Format:**
 - Execute necessary tools to get the data
 - Apply AUM conversion (lakhs to rupees) before displaying results
 - Format return values as percentages with proper decimal places
+- Include overall_rank and composite_score in fund recommendations
+- Highlight three-pillar scores (Performance, Risk Management, Cost Efficiency)
 - Provide clear, concise answers based on query results
 - Stop after providing the answer - don't ask follow-up questions
 
-Remember: Be direct and efficient. Use the correct table relationships and filtering for accurate results."""
+Remember: Use the sophisticated three-pillar ranking system for fund recommendations. Prioritize FUND_RANKINGS and HISTORICAL_RETURNS for comprehensive analysis. Be direct and efficient with proper table relationships."""
         
         # Create modern prompt structure with chat history support
         prompt = ChatPromptTemplate.from_messages([
@@ -423,6 +432,31 @@ async def root():
     """Root endpoint."""
     return {"message": "Multi-Tenant SQL Agent API", "version": "1.0.0"}
 
+
+@app.post("/clear-cache")
+async def clear_agent_cache():
+    """Clear agent cache to force recreation with updated prompts."""
+    try:
+        # Clear MCP orchestrator cache
+        orchestrator = get_mcp_orchestrator(static_dir="static/charts")
+        if hasattr(orchestrator, 'clear_cache'):
+            orchestrator.clear_cache()
+        
+        # Clear any other caches
+        logger.info("🗑️  Agent cache cleared - new prompts will be applied")
+        
+        return {
+            "status": "success",
+            "message": "Agent cache cleared successfully",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to clear cache: {e}")
+        return {
+            "status": "error", 
+            "message": f"Failed to clear cache: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
 
 @app.get("/health")
 async def health_check():
@@ -645,28 +679,41 @@ async def query_database_no_auth(request: QueryRequest):
         # Use anonymous user for testing
         anonymous_email = "anonymous@example.com"
         
-        # Ensure anonymous schema exists
-        ensure_user_schema(anonymous_email)
+        # Try database operations, but continue without them if they fail
+        chat_session = None
+        conversation_summary = "No previous conversation history."
+        user_preferences = {}
         
-        # Get or create active session for memory persistence
-        chat_session = session_manager.get_or_create_active_session(anonymous_email)
-        
-        # Add user message to chat history
-        user_message = session_manager.add_message(
-            session_id=chat_session.session_id,
-            message_type="human",
-            content=request.query,
-            metadata={"timestamp": datetime.now().isoformat(), "no_auth": True}
-        )
-        
-        # Get conversation context for agent memory
-        conversation_summary = session_manager.get_conversation_summary(
-            chat_session.session_id, 
-            last_n_messages=10
-        )
-        
-        # Get user preferences for personalized responses
-        user_preferences = session_manager.get_user_preferences(anonymous_email)
+        try:
+            # Ensure anonymous schema exists
+            ensure_user_schema(anonymous_email)
+            
+            # Get or create active session for memory persistence
+            chat_session = session_manager.get_or_create_active_session(anonymous_email)
+            
+            # Add user message to chat history
+            user_message = session_manager.add_message(
+                session_id=chat_session.session_id,
+                message_type="human",
+                content=request.query,
+                metadata={"timestamp": datetime.now().isoformat(), "no_auth": True}
+            )
+            
+            # Get conversation context for agent memory
+            conversation_summary = session_manager.get_conversation_summary(
+                chat_session.session_id, 
+                last_n_messages=10
+            )
+            
+            # Get user preferences for personalized responses
+            user_preferences = session_manager.get_user_preferences(anonymous_email)
+            
+        except Exception as db_error:
+            logger.warning(f"⚠️ Database operations failed, continuing with ReAct reasoning: {db_error}")
+            # Create a mock session for ReAct reasoning
+            chat_session = type('MockSession', (), {
+                'session_id': f"mock_session_{int(datetime.now().timestamp())}"
+            })()
         
         # Use Agent Orchestrator for graph-based coordination
         try:

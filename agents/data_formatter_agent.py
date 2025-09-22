@@ -95,6 +95,12 @@ class DataFormatterAgent:
             dataframe_info = quant_data.get('dataframe_info', {})
             original_sql_data = quant_data.get('original_sql_data', {})
             
+            # Extract ReAct reasoning components
+            reasoning_traces = quant_data.get('reasoning_traces', [])
+            investment_thesis = quant_data.get('investment_thesis', {})
+            analysis_confidence = quant_data.get('analysis_confidence', 0.5)
+            reasoning_session_id = quant_data.get('reasoning_session_id', 'unknown')
+            
             logger.info(f"Dataframe data length: {len(dataframe_data)}")
             logger.info(f"Dataframe data sample: {dataframe_data[:2] if dataframe_data else 'Empty'}")
             logger.info(f"Dataframe data type: {type(dataframe_data)}")
@@ -124,7 +130,7 @@ class DataFormatterAgent:
             logger.info(f"Chart inclusion decision: {include_chart}")
             logger.info(f"Table inclusion decision: {include_table}")
             
-            # Generate mixed response
+            # Generate mixed response with ReAct reasoning
             response_data = self._generate_mixed_response(
                 original_sql_data.get('sql_response', ''),
                 df,
@@ -133,7 +139,11 @@ class DataFormatterAgent:
                 query,
                 insights,
                 include_chart,
-                include_table
+                include_table,
+                reasoning_traces,
+                investment_thesis,
+                analysis_confidence,
+                reasoning_session_id
             )
             
             logger.info("✅ Data formatting completed successfully")
@@ -285,7 +295,9 @@ class DataFormatterAgent:
     def _generate_mixed_response(self, original_response: str, df: Optional[pd.DataFrame], 
                                 calculations: Dict[str, Any], calc_type: Optional[str], 
                                 query: str, insights: List[str], include_chart: bool = False,
-                                include_table: bool = False) -> Dict[str, Any]:
+                                include_table: bool = False, reasoning_traces: List[Dict] = None,
+                                investment_thesis: Dict[str, Any] = None, analysis_confidence: float = 0.5,
+                                reasoning_session_id: str = 'unknown') -> Dict[str, Any]:
         """Generate a clean, formatted response without duplication."""
         try:
             response_parts = []
@@ -342,6 +354,38 @@ class DataFormatterAgent:
             if data_table:
                 response_dict['data_table'] = data_table
                 logger.info("📋 Data table included in response")
+            
+            # Add ReAct reasoning information
+            if reasoning_traces:
+                response_dict['reasoning_traces'] = reasoning_traces
+                response_dict['reasoning_session_id'] = reasoning_session_id
+                logger.info(f"🧠 Reasoning traces included: {len(reasoning_traces)} steps")
+            
+            # Add investment thesis if available
+            if investment_thesis:
+                response_dict['investment_thesis'] = investment_thesis
+                response_dict['analysis_confidence'] = analysis_confidence
+                
+                # Add investment recommendation to the main response
+                recommendation = investment_thesis.get('primary_recommendation', 'Hold')
+                confidence = investment_thesis.get('confidence_level', 0.5)
+                
+                # Append investment thesis to response
+                thesis_summary = f"\n\n## 🎯 **Investment Recommendation: {recommendation}** (Confidence: {confidence:.1%})\n"
+                
+                key_reasons = investment_thesis.get('key_reasons', [])
+                if key_reasons:
+                    thesis_summary += "\n**Key Factors:**\n"
+                    for reason in key_reasons[:5]:  # Top 5 reasons
+                        thesis_summary += f"• {reason}\n"
+                
+                risk_assessment = investment_thesis.get('risk_assessment', 'Unknown')
+                strategic_outlook = investment_thesis.get('strategic_outlook', 'Neutral outlook')
+                thesis_summary += f"\n**Risk Level**: {risk_assessment}\n"
+                thesis_summary += f"**Strategic Outlook**: {strategic_outlook}\n"
+                
+                response_dict['response'] += thesis_summary
+                logger.info(f"💡 Investment thesis included: {recommendation} ({confidence:.1%})")
             
             return response_dict
             

@@ -7,12 +7,13 @@ The `mutual_fund` PostgreSQL database contains comprehensive mutual fund data fr
 ### Database Statistics (Updated: September 2025)
 - **Total Schemes**: 1,487 (100% coverage)
 - **Historical NAV Records**: 3,147,643 (19+ years: 2006-2025)
-- **Historical Returns Records**: 3,146,156 (daily & rolling returns)
+- **Historical Returns Records**: 1,487 (one per scheme with latest metrics)
 - **Historical Risk Records**: 1,308 (comprehensive risk metrics)
-- **Current Holdings Records**: 2,105 (portfolio compositions)
+- **Fund Rankings Records**: 1,484 (sophisticated ranking algorithm)
+- **Current Holdings Records**: 51,950 (comprehensive portfolio data)
 - **BSE Trading Details**: 1,487 (100% coverage)
-- **Total Database Size**: ~2.8 GB
-- **Total Records Processed**: 6,298,081
+- **Total Database Size**: ~3.2 GB
+- **Total Records Processed**: 6,352,051
 
 ### Data Sources
 - **Primary API**: https://app.mfapis.club/api/v1 (MFAPIs Club)
@@ -27,10 +28,11 @@ The `mutual_fund` PostgreSQL database contains comprehensive mutual fund data fr
 
 ```
 schemes (1:M) → historical_nav
-schemes (1:M) → historical_returns  
+schemes (1:1) → historical_returns  
 schemes (1:M) → historical_risk
 schemes (1:M) → current_holdings
 schemes (1:1) → bse_details
+schemes (1:1) → fund_rankings
 ```
 
 ### Foreign Key Constraints
@@ -214,37 +216,49 @@ ORDER BY avg_5yr DESC NULLS LAST;
 
 ## 3. HISTORICAL_RETURNS Table
 
-**Purpose**: Comprehensive daily returns and rolling returns analysis for all mutual fund schemes
-**Records**: 3,146,156 records (daily & periodic returns)
-**Table Size**: 1,033 MB
-**Coverage**: 100% of schemes with returns data
+**Purpose**: Latest NAV metrics and comprehensive returns analysis for all mutual fund schemes
+**Records**: 1,487 records (one per scheme with latest metrics)
+**Table Size**: 904 kB
+**Coverage**: 100% of schemes with latest returns data
 
 | Column | Type | Nullable | Default | Description |
 |--------|------|----------|---------|-------------|
 | id | INTEGER (PK) | NO | nextval() | Auto-increment primary key |
 | scheme_id | TEXT (FK) | NO | - | References schemes.id |
 | scheme_code | TEXT | NO | - | AMFI scheme code for reference |
-| return_date | DATE | NO | - | Date of the return calculation |
-| daily_return | NUMERIC | YES | - | Daily return percentage: (NAV_current / NAV_previous - 1) |
-| return_1d | NUMERIC | YES | - | 1-day return percentage |
-| return_1w | NUMERIC | YES | - | 1-week return percentage |
-| return_1m | NUMERIC | YES | - | 1-month return percentage |
-| return_3m | NUMERIC | YES | - | 3-month return percentage |
-| return_6m | NUMERIC | YES | - | 6-month return percentage |
-| return_1y | NUMERIC | YES | - | 1-year return percentage |
-| return_3y | NUMERIC | YES | - | 3-year return percentage |
-| return_5y | NUMERIC | YES | - | 5-year return percentage |
-| rolling_return_1y | NUMERIC | YES | - | 1-year rolling return (252 trading days lookback) |
-| rolling_return_3y | NUMERIC | YES | - | 3-year rolling return (756 trading days lookback) |
+| scheme_name | TEXT | NO | - | Full scheme name |
+| latest_nav_date | DATE | NO | - | Latest NAV date |
+| latest_nav_value | NUMERIC | NO | - | Latest NAV value |
+| return_1d | NUMERIC | YES | - | 1-day point-to-point return |
+| return_1w | NUMERIC | YES | - | 1-week point-to-point return |
+| return_1m | NUMERIC | YES | - | 1-month point-to-point return |
+| return_3m | NUMERIC | YES | - | 3-month point-to-point return |
+| return_6m | NUMERIC | YES | - | 6-month point-to-point return |
+| return_1y | NUMERIC | YES | - | 1-year point-to-point return |
+| return_3y | NUMERIC | YES | - | 3-year point-to-point return |
+| return_5y | NUMERIC | YES | - | 5-year point-to-point return |
+| return_7y | NUMERIC | YES | - | 7-year point-to-point return |
+| return_10y | NUMERIC | YES | - | 10-year point-to-point return |
+| annualized_1y | NUMERIC | YES | - | 1-year CAGR (annualized return) |
+| annualized_3y | NUMERIC | YES | - | 3-year CAGR (annualized return) |
+| annualized_5y | NUMERIC | YES | - | 5-year CAGR (annualized return) |
+| annualized_7y | NUMERIC | YES | - | 7-year CAGR (annualized return) |
+| annualized_10y | NUMERIC | YES | - | 10-year CAGR (annualized return) |
+| rolling_return_1y | NUMERIC | YES | - | 1-year rolling return as of latest date |
+| rolling_return_3y | NUMERIC | YES | - | 3-year rolling return as of latest date |
+| rolling_return_5y | NUMERIC | YES | - | 5-year rolling return as of latest date |
+| data_source | TEXT | YES | 'mfapis_club' | Data source identifier |
 | created_at | TIMESTAMP | YES | CURRENT_TIMESTAMP | Record creation time |
+| updated_at | TIMESTAMP | YES | CURRENT_TIMESTAMP | Last update time |
 
 **Constraints**:
 - `historical_returns_pkey` (PRIMARY KEY on id)
-- `historical_returns_scheme_id_return_date_key` (UNIQUE on scheme_id, return_date)
+- `historical_returns_scheme_id_key` (UNIQUE on scheme_id)
 - `historical_returns_scheme_id_fkey` (FOREIGN KEY to schemes.id)
 
-**Indexes**: Optimized for performance analysis and time-series queries
-- `idx_historical_returns_scheme_date` (scheme_id, return_date DESC)
+**Indexes**: Optimized for performance analysis and latest metrics queries
+- `idx_historical_returns_scheme_id` (scheme_id)
+- `idx_historical_returns_latest_nav_date` (latest_nav_date DESC)
 
 ### Text-to-SQL Examples
 
@@ -304,7 +318,163 @@ ORDER BY total_options DESC;
 
 ---
 
-## 4. HISTORICAL_RISK Table
+## 4. FUND_RANKINGS Table
+
+**Purpose**: Sophisticated fund ranking system using thematic factor grouping with three-pillar approach
+**Records**: 1,484 records (99.8% coverage - excludes 3 funds with AUM = 0)
+**Table Size**: 904 kB
+**Ranking Range**: 1 to 1,473 (overall ranking across all categories)
+
+**Algorithm Overview**:
+- **Pillar 1**: Risk-Adjusted Performance & Consistency (45% weight)
+- **Pillar 2**: Downside Protection & Risk Management (35% weight)  
+- **Pillar 3**: Cost Efficiency & Fund Health (20% weight)
+- **Normalization**: Percentile ranking within AMFI categories (0-100 scale)
+- **Final Score**: Weighted composite score with transparent pillar breakdown
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | INTEGER (PK) | NO | nextval() | Auto-increment primary key |
+| scheme_id | TEXT (FK) | NO | - | References schemes.id |
+| scheme_code | TEXT | NO | - | AMFI scheme code for reference |
+| scheme_name | TEXT | NO | - | Full scheme name |
+| amfi_broad | TEXT | NO | - | AMFI broad category (Equity, Debt, Hybrid, Other, Solution Oriented) |
+| amfi_sub | TEXT | YES | - | AMFI sub-category (Large Cap Fund, Liquid Fund, etc.) |
+| aum_cr | NUMERIC | YES | - | Assets Under Management in crores |
+| nav | NUMERIC | YES | - | Latest NAV value |
+| nav_date | DATE | YES | - | Latest NAV date |
+| **composite_score** | **NUMERIC** | **YES** | **-** | **Final composite score (0-100) - primary ranking metric** |
+| **overall_rank** | **INTEGER** | **YES** | **-** | **Overall ranking (1 to 1,473) across all funds** |
+| **category_rank** | **INTEGER** | **YES** | **-** | **Ranking within AMFI broad category** |
+| **pillar_1_score** | **NUMERIC** | **YES** | **-** | **Risk-Adjusted Performance pillar score (0-100)** |
+| **pillar_2_score** | **NUMERIC** | **YES** | **-** | **Downside Protection pillar score (0-100)** |
+| **pillar_3_score** | **NUMERIC** | **YES** | **-** | **Cost Efficiency pillar score (0-100)** |
+| sharpe_ratio_3y | NUMERIC | YES | - | 3-year Sharpe ratio (reward per unit risk) |
+| sortino_ratio_3y | NUMERIC | YES | - | 3-year Sortino ratio (downside deviation focus) |
+| jensen_alpha_3y | NUMERIC | YES | - | 3-year Jensen's Alpha (excess return over benchmark) |
+| avg_3y_rolling_return | NUMERIC | YES | - | Average 3-year rolling return |
+| avg_5y_rolling_return | NUMERIC | YES | - | Average 5-year rolling return |
+| maximum_drawdown_5y | NUMERIC | YES | - | Maximum drawdown over 5 years (risk measure) |
+| annualized_volatility_3y | NUMERIC | YES | - | 3-year annualized volatility (risk measure) |
+| annualized_volatility_5y | NUMERIC | YES | - | 5-year annualized volatility (risk measure) |
+| down_capture_ratio_3y | NUMERIC | YES | - | 3-year down-capture ratio (downside protection) |
+| var_95_1y | NUMERIC | YES | - | 1-year 95% Value at Risk |
+| beta_3y | NUMERIC | YES | - | 3-year beta (market correlation) |
+| fund_size_aum | NUMERIC | YES | - | Fund size in crores (for cost efficiency pillar) |
+| annualized_return_3y | NUMERIC | YES | - | 3-year CAGR |
+| annualized_return_5y | NUMERIC | YES | - | 5-year CAGR |
+| point_to_point_return_1y | NUMERIC | YES | - | 1-year total return |
+| point_to_point_return_3y | NUMERIC | YES | - | 3-year total return |
+| point_to_point_return_5y | NUMERIC | YES | - | 5-year total return |
+| calculation_date | DATE | YES | CURRENT_DATE | Date of ranking calculation |
+| created_at | TIMESTAMP | YES | CURRENT_TIMESTAMP | Record creation time |
+| updated_at | TIMESTAMP | YES | CURRENT_TIMESTAMP | Last update time |
+
+**Constraints**:
+- `fund_rankings_pkey` (PRIMARY KEY on id)
+- `fund_rankings_scheme_id_calculation_date_key` (UNIQUE on scheme_id, calculation_date)
+- `fund_rankings_scheme_id_fkey` (FOREIGN KEY to schemes.id)
+
+**Indexes**: Optimized for ranking queries and performance analysis
+- `idx_fund_rankings_overall_rank` (overall_rank) - Primary ranking index
+- `idx_fund_rankings_composite_score` (composite_score DESC) - Score-based queries
+- `idx_fund_rankings_category_rank` (amfi_broad, category_rank) - Category rankings
+- `idx_fund_rankings_amfi_broad` (amfi_broad) - Category filtering
+- `idx_fund_rankings_amfi_sub` (amfi_sub) - Sub-category filtering
+
+### Ranking Methodology
+
+**Three-Pillar Thematic Approach**:
+
+1. **Pillar 1: Risk-Adjusted Performance & Consistency (45%)**
+   - Sharpe Ratio (15%): Reward per unit of risk
+   - Sortino Ratio (10%): Focus on downside deviation
+   - Jensen's Alpha (7.5%): Manager skill assessment
+   - Average 3Y Rolling Return (10%): Performance consistency
+   - Average 5Y Rolling Return (7.5%): Long-term consistency
+
+2. **Pillar 2: Downside Protection & Risk Management (35%)**
+   - Maximum Drawdown 5Y (10.5%): Capital preservation
+   - Annualized Volatility 3Y/5Y (7% each): Risk measurement
+   - Down-capture Ratio (7%): Downside resilience
+   - VaR 95% (5.25%): Tail risk assessment
+   - Beta (5.25%): Market correlation
+
+3. **Pillar 3: Cost Efficiency & Fund Health (20%)**
+   - Fund Size/AUM (20%): Operational efficiency and stability
+
+**Normalization Process**:
+- Percentile ranking within AMFI broad categories (0-100 scale)
+- "Lower is better" metrics inverted (volatility, drawdown, etc.)
+- Robust to outliers, intuitive scoring system
+
+### Text-to-SQL Examples
+
+**1. "Show top 10 overall fund rankings across all categories"**
+```sql
+SELECT overall_rank, scheme_name, amfi_broad, composite_score,
+       pillar_1_score, pillar_2_score, pillar_3_score
+FROM fund_rankings 
+ORDER BY overall_rank 
+LIMIT 10;
+```
+
+**2. "Find best performing equity funds with detailed pillar breakdown"**
+```sql
+SELECT scheme_name, overall_rank, composite_score,
+       pillar_1_score as performance_score,
+       pillar_2_score as risk_mgmt_score,
+       pillar_3_score as efficiency_score,
+       annualized_return_3y, maximum_drawdown_5y
+FROM fund_rankings 
+WHERE amfi_broad = 'Equity'
+ORDER BY overall_rank 
+LIMIT 5;
+```
+
+**3. "Compare category leaders - top fund from each AMFI category"**
+```sql
+SELECT DISTINCT ON (amfi_broad) 
+       amfi_broad, scheme_name, overall_rank, composite_score
+FROM fund_rankings 
+ORDER BY amfi_broad, overall_rank;
+```
+
+**4. "Find funds with excellent risk management (high Pillar 2 scores)"**
+```sql
+SELECT scheme_name, amfi_broad, overall_rank, pillar_2_score,
+       maximum_drawdown_5y, annualized_volatility_3y
+FROM fund_rankings 
+WHERE pillar_2_score > 80
+ORDER BY pillar_2_score DESC;
+```
+
+**5. "Analyze ranking distribution by category"**
+```sql
+SELECT amfi_broad,
+       COUNT(*) as total_funds,
+       ROUND(AVG(composite_score), 2) as avg_score,
+       MIN(overall_rank) as best_rank,
+       MAX(overall_rank) as worst_rank
+FROM fund_rankings 
+GROUP BY amfi_broad
+ORDER BY avg_score DESC;
+```
+
+**6. "Portfolio construction: Find balanced funds across risk-return spectrum"**
+```sql
+SELECT scheme_name, amfi_broad, overall_rank, composite_score,
+       annualized_return_3y, maximum_drawdown_5y, aum_cr
+FROM fund_rankings 
+WHERE pillar_1_score > 70  -- Good performance
+  AND pillar_2_score > 60  -- Reasonable risk management
+  AND aum_cr > 1000        -- Sufficient size
+ORDER BY composite_score DESC;
+```
+
+---
+
+## 5. HISTORICAL_RISK Table
 
 **Purpose**: Comprehensive risk metrics and volatility analysis for mutual fund schemes
 **Records**: 1,308 records (88% coverage for 1Y+ periods)
@@ -379,10 +549,10 @@ ORDER BY total_options DESC;
 
 ---
 
-## 5. CURRENT_HOLDINGS Table
+## 6. CURRENT_HOLDINGS Table
 
 **Purpose**: Current portfolio holdings and asset allocation for mutual fund schemes
-**Records**: 2,105 records (portfolio compositions)
+**Records**: 51,950 records (comprehensive portfolio compositions)
 **Table Size**: 744 kB
 
 | Column | Type | Nullable | Default | Description |
@@ -409,7 +579,7 @@ ORDER BY total_options DESC;
 
 ---
 
-## 6. BSE_DETAILS Table
+## 7. BSE_DETAILS Table
 
 **Purpose**: BSE trading information and transaction capabilities
 **Records**: 1,487 records (100% coverage)
@@ -577,10 +747,19 @@ pg_dump --schema-only mutual_fund > mutual_fund_schema_$(date +%Y%m%d).sql
 
 ---
 
-*Last Updated: September 13, 2025*
+*Last Updated: September 18, 2025*
 *Database Version: PostgreSQL 13+*
-*Total Records: 6,298,081*
-*Total Size: ~2.8 GB*
+*Total Records: 6,352,051*
+*Total Size: ~3.2 GB*
+
+**Key Tables Summary:**
+- **schemes**: 1,487 mutual fund schemes (master table)
+- **historical_nav**: 3,147,643 daily NAV records with daily returns
+- **historical_returns**: 1,487 latest metrics per scheme
+- **historical_risk**: 1,308 comprehensive risk metrics
+- **fund_rankings**: 1,484 sophisticated rankings with three-pillar scoring
+- **current_holdings**: 51,950 portfolio composition records
+- **bse_details**: 1,487 trading and transaction details
 
 
 | Column | Type | Description |
@@ -2152,6 +2331,16 @@ pg_dump mutual_fund > mutual_fund_backup_$(date +%Y%m%d).sql
 
 ---
 
-*Last Updated: September 12, 2025*
-*Total Records: 6,078,093 across 10 tables (including 3,037,708 historical NAV records, 3,036,230 historical returns records, and 4,155 historical risk records)*
+*Last Updated: September 18, 2025*
+*Total Records: 6,352,051 across 8 core tables*
+
+**Complete Database Coverage:**
+- **3,147,643** historical NAV records with daily returns (19+ years: 2006-2025)
+- **1,487** latest return metrics (one per scheme)
+- **1,484** sophisticated fund rankings with three-pillar scoring
+- **1,308** comprehensive risk metrics
+- **51,950** current portfolio holdings
+- **1,487** BSE trading details
+
 *Data Sources: MF APIs Club (https://app.mfapis.club) + MFApi.in (https://api.mfapi.in)*
+*Ranking Algorithm: Three-pillar thematic factor grouping with percentile normalization*
