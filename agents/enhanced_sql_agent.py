@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Enhanced SQL Agent - Focused on database operations only
+Enhanced SQL Agent - A2A Protocol Integration
 
 This agent handles:
 - Database discovery and connection management
 - SQL query generation and execution
 - Database context management
-- Orchestrating the data flow to next agents
+- A2A protocol integration for seamless agent communication
+- Conditional orchestration of downstream agents
 """
 
 import logging
@@ -20,10 +21,15 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
 import pandas as pd
 import uuid
+import asyncio
 
 from settings import settings
 from database_discovery import discovery_service
 from agent_prompts import get_agent_prompt
+from .a2a_protocol import (
+    A2AProtocol, A2AMessage, AgentType, MessageType, AgentCapability,
+    QueryAnalyzer, QueryAnalysis, get_a2a_protocol
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +47,7 @@ class EnhancedSQLAgent:
     
     def __init__(self, user_email: Optional[str] = None, discovery_mode: str = 'comprehensive'):
         """
-        Initialize the Enhanced SQL Agent.
+        Initialize the Enhanced SQL Agent with A2A protocol integration.
         
         Args:
             user_email: User's email for schema-per-tenant architecture
@@ -49,6 +55,14 @@ class EnhancedSQLAgent:
         """
         self.user_email = user_email
         self.discovery_mode = discovery_mode
+        self.a2a_protocol = get_a2a_protocol()
+        
+        # Register with A2A protocol
+        self.a2a_protocol.register_agent(
+            AgentType.ENHANCED_SQL,
+            [AgentCapability.DATABASE_QUERY],
+            self
+        )
         self.llm = ChatOpenAI(
             model_name=settings.openai_model,
             temperature=settings.openai_temperature,
@@ -464,7 +478,42 @@ class EnhancedSQLAgent:
             Parsed data as list of rows
         """
         try:
-            # Look for patterns that indicate SQL results
+            # First try to parse as Python list/tuple format (most common)
+            if observation.strip().startswith('[') and observation.strip().endswith(']'):
+                try:
+                    import ast
+                    from decimal import Decimal
+                    
+                    # Handle Decimal objects by replacing them with float strings
+                    obs_str = observation.strip()
+                    
+                    # Replace Decimal('x.xx') with float values
+                    import re
+                    decimal_pattern = r"Decimal\('([^']+)'\)"
+                    obs_str = re.sub(decimal_pattern, r'\1', obs_str)
+                    
+                    parsed_data = ast.literal_eval(obs_str)
+                    if isinstance(parsed_data, list) and parsed_data:
+                        # Convert tuples to lists and filter out None-only rows
+                        result = []
+                        for row in parsed_data:
+                            if isinstance(row, (tuple, list)):
+                                row_list = []
+                                for val in row:
+                                    # Convert Decimal objects to float
+                                    if hasattr(val, '__class__') and val.__class__.__name__ == 'Decimal':
+                                        row_list.append(float(val))
+                                    else:
+                                        row_list.append(val)
+                                # Only include rows that have at least one non-None value
+                                if any(val is not None for val in row_list):
+                                    result.append(row_list)
+                        logger.info(f"✅ Parsed {len(result)} rows from Python list format")
+                        return result
+                except (ValueError, SyntaxError) as e:
+                    logger.warning(f"Failed to parse as Python literal: {e}")
+            
+            # Fallback: Look for other patterns
             lines = observation.split('\n')
             data_rows = []
             
@@ -485,6 +534,9 @@ class EnhancedSQLAgent:
                             data_rows.append(row_data)
                     except:
                         continue
+            
+            if data_rows:
+                logger.info(f"✅ Parsed {len(data_rows)} rows from fallback format")
             
             return data_rows
             
@@ -793,9 +845,9 @@ class EnhancedSQLAgent:
             logger.error(f"❌ Agent coordination failed: {e}")
             return sql_data  # Return original SQL data on coordination failure
     
-    def process_query(self, query: str, session_id: Optional[str] = None, 
-                     database_name: Optional[str] = None, 
-                     schema_name: Optional[str] = None) -> Dict[str, Any]:
+    async def process_query(self, query: str, session_id: Optional[str] = None, 
+                           database_name: Optional[str] = None, 
+                           schema_name: Optional[str] = None) -> Dict[str, Any]:
         """
         Process a SQL query and return structured data for next agents.
         
@@ -873,6 +925,13 @@ class EnhancedSQLAgent:
             
             logger.info("✅ SQL query executed successfully")
             
+            # Debug: Log the actual result to see what SQL was generated
+            logger.info(f"🔍 Agent result output: {result.get('output', '')[:500]}...")
+            if result.get('intermediate_steps'):
+                for i, step in enumerate(result.get('intermediate_steps', [])):
+                    logger.info(f"🔍 Step {i}: Action={step[0] if len(step) > 0 else 'None'}")
+                    logger.info(f"🔍 Step {i}: Observation={str(step[1])[:300] if len(step) > 1 else 'None'}...")
+            
             # Extract SQL data from result
             sql_data = self._extract_sql_data_from_result(result)
             
@@ -895,8 +954,8 @@ class EnhancedSQLAgent:
             
             logger.info(f"📊 SQL data extracted: {len(sql_data)} rows")
             
-            # Graph-based agent coordination: Call conditional agents if needed
-            enhanced_response = self._coordinate_agents(query, response_data)
+            # A2A Protocol: Analyze query and coordinate with downstream agents
+            enhanced_response = await self._a2a_coordinate_agents(query, response_data, session_id)
             
             # Store query results in session cache for future plotting
             if enhanced_response.get('success') and (enhanced_response.get('sql_data') or enhanced_response.get('raw_data')):
@@ -922,6 +981,198 @@ class EnhancedSQLAgent:
                     'has_data': False
                 }
             }
+    
+    async def _a2a_coordinate_agents(self, query: str, sql_data: Dict[str, Any], 
+                                   session_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        A2A Protocol: Coordinate with downstream agents based on query analysis.
+        
+        Args:
+            query: User's natural language query
+            sql_data: SQL execution results
+            session_id: Optional session ID for context
+            
+        Returns:
+            Enhanced response with analysis and/or visualization
+        """
+        try:
+            logger.info("🔄 Starting A2A agent coordination...")
+            
+            # Step 1: Analyze query to determine required agents
+            query_analysis = QueryAnalyzer.analyze_query(query)
+            logger.info(f"📊 Query analysis: requires_analysis={query_analysis.requires_analysis}, requires_visualization={query_analysis.requires_visualization}, requires_pdf={query_analysis.requires_pdf_export}")
+            
+            # Initialize response with SQL results
+            final_response = sql_data.copy()
+            agents_invoked = ['enhanced_sql']
+            
+            # Step 2: Conditional invocation of Mutual Fund Quant Agent
+            if query_analysis.requires_analysis and sql_data.get('sql_data'):
+                logger.info("🧮 Invoking Mutual Fund Quant Agent via A2A protocol...")
+                
+                # Create A2A message for quant agent
+                quant_message = self.a2a_protocol.create_message(
+                    sender=AgentType.ENHANCED_SQL,
+                    recipient=AgentType.MUTUAL_FUND_QUANT,
+                    message_type=MessageType.ANALYSIS_REQUEST,
+                    payload={
+                        'query': query,
+                        'data': sql_data.get('sql_data'),
+                        'sql_response': sql_data.get('sql_response')
+                    },
+                    context={
+                        'session_id': session_id,
+                        'user_email': self.user_email,
+                        'query_analysis': query_analysis.__dict__
+                    }
+                )
+                
+                try:
+                    # Import and invoke quant agent
+                    from .mutual_fund_quant_agent import MutualFundQuantAgent
+                    quant_agent = MutualFundQuantAgent()
+                    
+                    # Process through quant agent with ReAct reasoning
+                    quant_result = await asyncio.to_thread(
+                        quant_agent.process_data,
+                        sql_data.get('sql_data'),
+                        query
+                    )
+                    
+                    if quant_result.get('success', False):
+                        # Merge quant analysis into response
+                        final_response.update({
+                            'analysis': quant_result.get('analysis'),
+                            'reasoning_trace': quant_result.get('reasoning_trace'),
+                            'investment_thesis': quant_result.get('investment_thesis'),
+                            'analysis_confidence': quant_result.get('analysis_confidence', 0.5)
+                        })
+                        agents_invoked.append('mutual_fund_quant')
+                        
+                        # Create response message
+                        self.a2a_protocol.create_message(
+                            sender=AgentType.MUTUAL_FUND_QUANT,
+                            recipient=AgentType.ENHANCED_SQL,
+                            message_type=MessageType.ANALYSIS_RESPONSE,
+                            payload=quant_result,
+                            parent_message_id=quant_message.message_id
+                        )
+                        
+                        logger.info("✅ Quant Agent processing completed via A2A")
+                    else:
+                        logger.warning(f"⚠️ Quant Agent failed: {quant_result.get('error')}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Quant Agent A2A invocation failed: {e}")
+            
+            # Step 3: Conditional invocation of Data Formatter Agent
+            if query_analysis.requires_visualization or query_analysis.requires_pdf_export:
+                logger.info("📊 Invoking Data Formatter Agent via A2A protocol...")
+                
+                # Create A2A message for formatter agent
+                format_message = self.a2a_protocol.create_message(
+                    sender=AgentType.ENHANCED_SQL,
+                    recipient=AgentType.DATA_FORMATTER,
+                    message_type=MessageType.FORMAT_REQUEST,
+                    payload={
+                        'query': query,
+                        'sql_data': sql_data.get('sql_data'),
+                        'analysis_data': final_response.get('analysis'),
+                        'reasoning_trace': final_response.get('reasoning_trace'),
+                        'requires_pdf': query_analysis.requires_pdf_export
+                    },
+                    context={
+                        'session_id': session_id,
+                        'user_email': self.user_email,
+                        'query_analysis': query_analysis.__dict__
+                    }
+                )
+                
+                try:
+                    # Import and invoke formatter agent
+                    from .data_formatter_agent import DataFormatterAgent
+                    formatter_agent = DataFormatterAgent(static_dir="static/charts")
+                    
+                    # Process through formatter agent
+                    format_result = await asyncio.to_thread(
+                        formatter_agent.create_comprehensive_response,
+                        sql_data.get('sql_data'),
+                        query,
+                        final_response.get('analysis'),
+                        final_response.get('reasoning_trace')
+                    )
+                    
+                    if format_result.get('success', False):
+                        # Merge formatter results
+                        final_response.update({
+                            'chart_files': format_result.get('chart_files', []),
+                            'chart_file': format_result.get('chart_files', [None])[0],
+                            'formatted_response': format_result.get('response')
+                        })
+                        agents_invoked.append('data_formatter')
+                        
+                        # Generate PDF if requested
+                        if query_analysis.requires_pdf_export:
+                            from .pdf_report_generator import get_pdf_generator
+                            pdf_generator = get_pdf_generator()
+                            
+                            pdf_result = pdf_generator.generate_comprehensive_report(
+                                query=query,
+                                sql_data=sql_data,
+                                analysis_data={
+                                    'analysis': final_response.get('analysis'),
+                                    'investment_thesis': final_response.get('investment_thesis'),
+                                    'analysis_confidence': final_response.get('analysis_confidence')
+                                },
+                                reasoning_trace=final_response.get('reasoning_trace'),
+                                chart_files=final_response.get('chart_files')
+                            )
+                            
+                            if pdf_result.get('success'):
+                                final_response['pdf_file'] = pdf_result.get('pdf_file')
+                                logger.info(f"📄 PDF report generated: {pdf_result.get('pdf_file')}")
+                        
+                        # Create response message
+                        self.a2a_protocol.create_message(
+                            sender=AgentType.DATA_FORMATTER,
+                            recipient=AgentType.ENHANCED_SQL,
+                            message_type=MessageType.FORMAT_RESPONSE,
+                            payload=format_result,
+                            parent_message_id=format_message.message_id
+                        )
+                        
+                        logger.info("✅ Data Formatter processing completed via A2A")
+                    else:
+                        logger.warning(f"⚠️ Data Formatter failed: {format_result.get('error')}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Data Formatter A2A invocation failed: {e}")
+            
+            # Step 4: Consolidate final response
+            final_response['agents_invoked'] = agents_invoked
+            final_response['a2a_metadata'] = {
+                'query_analysis': query_analysis.__dict__,
+                'agents_invoked': agents_invoked,
+                'protocol_messages': len(self.a2a_protocol.message_history),
+                'coordination_success': True
+            }
+            
+            # Use formatted response if available, otherwise use SQL response
+            if final_response.get('formatted_response'):
+                final_response['sql_response'] = final_response['formatted_response']
+            
+            logger.info(f"🎉 A2A coordination completed - Agents invoked: {agents_invoked}")
+            return final_response
+            
+        except Exception as e:
+            logger.error(f"❌ A2A coordination failed: {e}")
+            # Return original SQL data on coordination failure
+            sql_data['agents_invoked'] = ['enhanced_sql']
+            sql_data['a2a_metadata'] = {
+                'coordination_success': False,
+                'error': str(e)
+            }
+            return sql_data
     
     def get_database_info(self) -> Dict[str, Any]:
         """Get current database discovery information."""

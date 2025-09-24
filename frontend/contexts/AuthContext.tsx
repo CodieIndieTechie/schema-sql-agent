@@ -50,10 +50,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, []);
 
   const login = (token: string, userData: User) => {
+    console.log('🔐 AuthContext: Login called with:', { token: token ? 'present' : 'missing', userData });
     // Store token and user data in cookies
     Cookies.set('auth_token', token, { expires: 1 }); // 1 day expiry
     Cookies.set('user_data', JSON.stringify(userData), { expires: 1 });
     setUser(userData);
+    console.log('✅ AuthContext: User state updated, isAuthenticated will be:', !!userData);
   };
 
   const logout = () => {

@@ -11,7 +11,7 @@ import uuid
 import tempfile
 import logging
 from datetime import datetime
-from typing import List, Optional, Any, Union
+from typing import List, Optional, Any, Union, Dict
 from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -214,12 +214,14 @@ def create_multitenant_sql_agent(database_uri: str, schema_name: str = None) -> 
         # System prompt for mutual fund database access
         system_prompt = """You are a helpful SQL expert assistant with access to the mutual_fund PostgreSQL database.
 
+**CRITICAL INSTRUCTION: For ALL performance queries (1-year returns, 3-year returns, etc.), ALWAYS use the FUND_RANKINGS table with columns like point_to_point_return_1y, annualized_return_3y, etc. DO NOT use historical_returns table for performance queries.**
+
 You have access to a comprehensive mutual fund database containing 6,352,051+ records across 8 interconnected tables for 1,487 AMFI registered mutual fund schemes:
 
 **Core Tables & Relationships:**
 ```
-schemes (1:1) → historical_returns
-schemes (1:1) → fund_rankings  
+schemes (1:1) → fund_rankings
+schemes (1:1) → historical_returns  
 schemes (1:M) → bse_details
 schemes (1:M) → historical_nav
 schemes (1:M) → historical_risk
@@ -256,7 +258,7 @@ Sophisticated three-pillar ranking system:
 - `pillar_1_score` (DECIMAL): Performance score (45% weight)
 - `pillar_2_score` (DECIMAL): Risk Management score (35% weight) 
 - `pillar_3_score` (DECIMAL): Cost Efficiency score (20% weight)
-- Performance metrics: `annualized_return_1y`, `annualized_return_3y`, `annualized_return_5y`, `avg_3y_rolling_return`, `avg_5y_rolling_return`
+- Performance metrics: `point_to_point_return_1y`, `annualized_return_3y`, `annualized_return_5y`, `avg_3y_rolling_return`, `avg_5y_rolling_return`
 - Risk metrics: `annualized_volatility_3y`, `annualized_volatility_5y`, `maximum_drawdown_5y`, `sharpe_ratio_3y`, `sortino_ratio_3y`
 - Advanced: `jensen_alpha_3y`, `beta_3y`, `down_capture_ratio_3y`, `up_capture_ratio_3y`, `var_95_1y`
 - `aum_cr` (DECIMAL): AUM in crores
@@ -340,7 +342,7 @@ Trading and transaction information:
 **IMPORTANT - Enhanced Query Routing Guidelines:**
 1. **Risk-Adjusted Returns (PRIORITY #1)**: Use `fund_rankings` table directly - contains ALL risk metrics (sharpe_ratio_3y, sortino_ratio_3y, jensen_alpha_3y, maximum_drawdown_5y, annualized_volatility_3y)
 2. **Fund Rankings & Selection**: Use `fund_rankings` for sophisticated fund selection with three-pillar scoring
-3. **Performance Analysis**: Use `historical_returns` for latest comprehensive performance metrics
+3. **Performance Analysis**: Use `fund_rankings` for latest comprehensive performance metrics
 4. **Fund Information**: Use `schemes` table for basic fund details, categories, AUM, NAV
 5. **Risk Analysis**: Use `fund_rankings` for standard risk metrics, `historical_risk` for detailed analysis
 6. **Portfolio Analysis**: Use `current_holdings` for sector allocation, top holdings, diversification
@@ -349,8 +351,9 @@ Trading and transaction information:
 
 **Enhanced Query Patterns:**
 - **Fund Selection**: Use `fund_rankings` for overall_rank, composite_score, pillar scores
-- **Performance Analysis**: JOIN schemes + historical_returns + fund_rankings for comprehensive analysis
+- **Performance Analysis**: Use `fund_rankings` directly for comprehensive performance analysis
 - **Risk-Adjusted Performance**: Use fund_rankings for sharpe_ratio_3y, maximum_drawdown_5y, volatility metrics
+- **International/Global Funds**: For queries about "international", "global", "overseas" funds, use: amfi_sub = 'FoFs Overseas' OR scheme_name ILIKE '%Global%' OR scheme_name ILIKE '%International%' OR scheme_name ILIKE '%Overseas%' OR scheme_name ILIKE '%US%'
 - **Portfolio Analysis**: JOIN schemes + current_holdings for sector allocation and diversification
 - **Investment Options**: JOIN schemes + bse_details for transaction capabilities
 - **Top Funds by Category**: JOIN schemes + fund_rankings filtered by amfi_broad/amfi_sub
@@ -359,7 +362,7 @@ Trading and transaction information:
 **Enhanced Filtering & Sorting Best Practices:**
 - **Fund Rankings**: Sort by `overall_rank ASC` (1 = best), `composite_score DESC` for top funds
 - **Category Filtering**: Use `amfi_broad` (Equity, Debt, Hybrid) and `amfi_sub` for specific types
-- **Performance Ranking**: Sort by `return_1y DESC`, `return_3y DESC`, `annualized_3y DESC`
+- **Performance Ranking**: Sort by `point_to_point_return_1y DESC`, `annualized_return_3y DESC`, `annualized_return_5y DESC`
 - **Risk-Adjusted Performance**: Sort by `sharpe_ratio_3y DESC`, `sortino_ratio_3y DESC`
 - **Risk Management**: Sort by `maximum_drawdown_5y DESC` (less negative = better), `annualized_volatility_3y ASC`
 - **Three-Pillar Analysis**: Filter by `pillar_1_score`, `pillar_2_score`, `pillar_3_score` thresholds
@@ -372,13 +375,14 @@ Trading and transaction information:
 1. **Prioritize FUND_RANKINGS**: Use for fund selection, ranking, and risk-adjusted performance analysis
 2. **Use HISTORICAL_RETURNS**: For latest comprehensive performance metrics (100% coverage)
 3. **Leverage Three-Pillar System**: Consider overall_rank and composite_score for recommendations
-4. **Efficient JOINs**: Always join through schemes.id for referential integrity
-5. **Meaningful Limits**: Use LIMIT 10-15 for fund lists, LIMIT 5 for detailed analysis
-6. **Handle NULLs**: Gracefully handle NULL values in performance and risk data
-7. **Portfolio Analysis**: Use current_holdings for sector allocation and diversification metrics
-8. **Risk Analysis**: Use fund_rankings for standard metrics, historical_risk for detailed analysis
-9. **Performance Periods**: Use return_1y, return_3y, return_5y for standardized comparisons
-10. **Data Coverage**: FUND_RANKINGS (99.8%), HISTORICAL_RETURNS (100%), CURRENT_HOLDINGS (comprehensive)
+4. **International Funds**: For "top international funds" queries, use: SELECT scheme_name, overall_rank, composite_score FROM fund_rankings WHERE amfi_sub = 'FoFs Overseas' OR scheme_name ILIKE '%Global%' OR scheme_name ILIKE '%International%' OR scheme_name ILIKE '%Overseas%' OR scheme_name ILIKE '%US%' ORDER BY overall_rank LIMIT 15
+5. **Efficient JOINs**: Always join through schemes.id for referential integrity
+6. **Meaningful Limits**: Use LIMIT 10-15 for fund lists, LIMIT 5 for detailed analysis
+7. **Handle NULLs**: Gracefully handle NULL values in performance and risk data
+8. **Portfolio Analysis**: Use current_holdings for sector allocation and diversification metrics
+9. **Risk Analysis**: Use fund_rankings for standard metrics, historical_risk for detailed analysis
+10. **Performance Periods**: Use point_to_point_return_1y, annualized_return_3y, annualized_return_5y for standardized comparisons
+11. **Data Coverage**: FUND_RANKINGS (99.8%), HISTORICAL_RETURNS (100%), CURRENT_HOLDINGS (comprehensive)
 
 **Response Format:**
 - Execute necessary tools to get the data
@@ -583,8 +587,9 @@ async def query_database(
         # Get user session from schema user service
         session = schema_user_service.create_session_from_email(current_user.email, current_user.name)
         
-        # Get MCP orchestrator instance
-        orchestrator = get_mcp_orchestrator(static_dir="static/charts")
+        # Get A2A service instance
+        from services.a2a_service import get_a2a_service
+        a2a_service = get_a2a_service()
         
         # Enhanced query with memory context
         enhanced_query = request.query
@@ -600,16 +605,22 @@ Current query: {request.query}
 Please consider the conversation history and user preferences when responding.
 """
         
-        # Process query through MCP orchestrator
-        result = await orchestrator.process_query(
+        # Process query through A2A protocol
+        result = await a2a_service.process_query(
             query=enhanced_query,
             user_email=current_user.email,
-            session_id=str(chat_session.session_id)
+            session_id=str(chat_session.session_id),
+            context={
+                'conversation_summary': conversation_summary,
+                'user_preferences': user_preferences,
+                'session_data': session.to_dict() if hasattr(session, 'to_dict') else {}
+            }
         )
         
-        # Extract chart files from MCP result
+        # Extract chart files and PDF from A2A result
         chart_files = result.get("chart_files", [])
         chart_file = chart_files[0] if chart_files else None
+        pdf_file = result.get("pdf_file")
         
         # Store query results and charts in context
         if chart_files:
@@ -1409,7 +1420,162 @@ async def serve_chart_embed(chart_file: str):
 # Include session management routes
 app.include_router(session_router)
 
-# All routes are now handled by the three-agent orchestrator pipeline above
+# A2A Protocol API Endpoints
+
+@app.get("/a2a/health", response_model=dict[str, Any])
+async def get_a2a_health():
+    """
+    Get A2A service health status.
+    
+    Returns comprehensive health information for the A2A protocol,
+    orchestrators, and all registered agents.
+    """
+    try:
+        from services.a2a_service import get_a2a_service
+        a2a_service = get_a2a_service()
+        
+        health_status = a2a_service.get_service_health()
+        return health_status
+        
+    except Exception as e:
+        logger.error(f"A2A health check failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
+
+
+@app.get("/a2a/capabilities", response_model=dict[str, Any])
+async def get_a2a_capabilities():
+    """
+    Get A2A service capabilities.
+    
+    Returns information about supported operations, query types,
+    chart types, export formats, and agent capabilities.
+    """
+    try:
+        from services.a2a_service import get_a2a_service
+        a2a_service = get_a2a_service()
+        
+        capabilities = a2a_service.get_service_capabilities()
+        return capabilities
+        
+    except Exception as e:
+        logger.error(f"A2A capabilities check failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Capabilities check failed: {str(e)}")
+
+
+@app.post("/a2a/analyze-query", response_model=dict[str, Any])
+async def analyze_query_capabilities(request: QueryRequest):
+    """
+    Analyze a query to determine required capabilities and estimated processing time.
+    
+    This endpoint helps users understand what agents will be invoked
+    and approximately how long processing will take.
+    """
+    try:
+        from services.a2a_service import get_a2a_service
+        a2a_service = get_a2a_service()
+        
+        analysis = a2a_service.analyze_query_capabilities(request.query)
+        return analysis
+        
+    except Exception as e:
+        logger.error(f"Query analysis failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Query analysis failed: {str(e)}")
+
+
+@app.get("/a2a/reports/{user_email}", response_model=List[Dict[str, Any]])
+async def list_user_reports(user_email: str, current_user: User = Depends(get_current_user)):
+    """
+    List available PDF reports for a user.
+    
+    Returns a list of generated reports with metadata including
+    file size, creation date, and report type.
+    """
+    try:
+        # Verify user access (users can only see their own reports)
+        if current_user.email != user_email and not current_user.is_admin:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        from services.a2a_service import get_a2a_service
+        a2a_service = get_a2a_service()
+        
+        reports = a2a_service.list_available_reports(user_email)
+        return reports
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list reports for {user_email}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to list reports: {str(e)}")
+
+
+@app.get("/a2a/reports/download/{filename}")
+async def download_report(filename: str, current_user: User = Depends(get_current_user)):
+    """
+    Download a generated PDF report.
+    
+    Serves PDF reports generated by the A2A system for download.
+    Users can only download their own reports unless they are admin.
+    """
+    try:
+        # Validate filename
+        if ".." in filename or "/" in filename or "\\" in filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
+        if not (filename.endswith('.pdf') or filename.endswith('.txt')):
+            raise HTTPException(status_code=400, detail="Invalid file type")
+        
+        from services.a2a_service import get_a2a_service
+        a2a_service = get_a2a_service()
+        
+        file_path = a2a_service.get_pdf_file_path(filename)
+        
+        if not file_path:
+            raise HTTPException(status_code=404, detail="Report not found")
+        
+        # Determine media type
+        media_type = "application/pdf" if filename.endswith('.pdf') else "text/plain"
+        
+        return FileResponse(
+            path=file_path,
+            media_type=media_type,
+            filename=filename,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to download report {filename}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to download report: {str(e)}")
+
+
+@app.post("/a2a/cleanup", response_model=dict[str, Any])
+async def cleanup_a2a_sessions(hours: int = 24, current_user: User = Depends(get_current_user)):
+    """
+    Clean up inactive A2A sessions and old protocol messages.
+    
+    Admin-only endpoint for system maintenance.
+    """
+    try:
+        if not current_user.is_admin:
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        from services.a2a_service import get_a2a_service
+        a2a_service = get_a2a_service()
+        
+        cleanup_result = a2a_service.cleanup_inactive_sessions(hours)
+        return cleanup_result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"A2A cleanup failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
+
+
+# All routes are now handled by the A2A protocol orchestrator pipeline above
 
 include_auth_routes(app)
 

@@ -48,11 +48,11 @@ LIMIT 10;
 
 **SQL Query:**
 ```sql
-SELECT scheme_name, amfi_broad, amfi_sub, aum_in_lakhs,
-       ROUND(aum_in_lakhs/100000, 2) as aum_crores
-FROM schemes 
-WHERE aum_in_lakhs IS NOT NULL
-ORDER BY aum_in_lakhs DESC 
+SELECT scheme_name, amfi_broad, amfi_sub, aum_cr,
+       overall_rank, composite_score
+FROM fund_rankings 
+WHERE aum_cr IS NOT NULL
+ORDER BY aum_cr DESC 
 LIMIT 15;
 ```
 
@@ -74,12 +74,12 @@ LIMIT 10;
 
 **SQL Query:**
 ```sql
-SELECT fr.scheme_name, fr.overall_rank, fr.composite_score,
-       fr.annualized_return_3y, fr.maximum_drawdown_5y, fr.aum_cr
-FROM fund_rankings fr
-JOIN schemes s ON fr.scheme_id = s.id
-WHERE s.amfi_sub = 'Large Cap Fund'
-ORDER BY fr.overall_rank
+SELECT scheme_name, overall_rank, composite_score,
+       annualized_return_3y, maximum_drawdown_5y, aum_cr,
+       pillar_1_score, pillar_2_score, sharpe_ratio_3y
+FROM fund_rankings 
+WHERE amfi_sub = 'Large Cap Fund'
+ORDER BY overall_rank
 LIMIT 10;
 ```
 
@@ -111,17 +111,32 @@ LIMIT 10;
 
 ### 8. Which funds have the highest 1-year returns?
 **Natural Language:** Find mutual funds with the best 1-year performance.
+**Alternative phrases:** "highest 1-year returns", "best 1-year performance", "top 1-year returns", "Which funds have the highest 1-year returns?"
+
+**CRITICAL: ALWAYS use fund_rankings table with point_to_point_return_1y column for 1-year returns. NEVER use historical_returns table.**
 
 **SQL Query:**
 ```sql
-SELECT hr.scheme_name, s.amfi_broad, hr.return_1y, hr.annualized_1y,
-       fr.overall_rank, hr.latest_nav_value
-FROM historical_returns hr
-JOIN schemes s ON hr.scheme_id = s.id
-LEFT JOIN fund_rankings fr ON hr.scheme_id = fr.scheme_id
-WHERE hr.return_1y IS NOT NULL
-ORDER BY hr.return_1y DESC
-LIMIT 15;
+SELECT scheme_name, amfi_broad, point_to_point_return_1y, 
+       annualized_return_3y, overall_rank, composite_score,
+       aum_cr, sharpe_ratio_3y
+FROM fund_rankings 
+WHERE point_to_point_return_1y IS NOT NULL
+ORDER BY point_to_point_return_1y DESC NULLS LAST
+LIMIT 10;
+```
+
+### 8a. Show me funds with highest 1-year returns
+**Natural Language:** Show me funds with highest 1-year returns
+**Alternative phrases:** "funds with highest 1-year returns", "top performing funds 1 year"
+
+**SQL Query:**
+```sql
+SELECT scheme_name, point_to_point_return_1y, overall_rank, composite_score
+FROM fund_rankings 
+WHERE point_to_point_return_1y IS NOT NULL
+ORDER BY point_to_point_return_1y DESC NULLS LAST
+LIMIT 10;
 ```
 
 ### 9. What are the best performing small cap funds?
@@ -129,12 +144,12 @@ LIMIT 15;
 
 **SQL Query:**
 ```sql
-SELECT fr.scheme_name, fr.overall_rank, fr.composite_score,
-       fr.annualized_return_3y, fr.annualized_volatility_3y, fr.aum_cr
-FROM fund_rankings fr
-JOIN schemes s ON fr.scheme_id = s.id
-WHERE s.amfi_sub LIKE '%Small Cap%'
-ORDER BY fr.overall_rank
+SELECT scheme_name, overall_rank, composite_score,
+       annualized_return_3y, annualized_volatility_3y, aum_cr,
+       pillar_1_score, pillar_2_score, sharpe_ratio_3y
+FROM fund_rankings 
+WHERE amfi_sub = 'Small Cap Fund'
+ORDER BY overall_rank
 LIMIT 10;
 ```
 
@@ -157,12 +172,12 @@ LIMIT 10;
 
 **SQL Query:**
 ```sql
-SELECT fr.scheme_name, fr.overall_rank, fr.composite_score,
-       fr.annualized_return_3y, fr.sharpe_ratio_3y, fr.aum_cr
-FROM fund_rankings fr
-JOIN schemes s ON fr.scheme_id = s.id
-WHERE s.amfi_sub LIKE '%Mid Cap%'
-ORDER BY fr.overall_rank
+SELECT scheme_name, overall_rank, composite_score,
+       annualized_return_3y, sharpe_ratio_3y, aum_cr,
+       pillar_1_score, pillar_2_score, maximum_drawdown_5y
+FROM fund_rankings 
+WHERE amfi_sub = 'Mid Cap Fund'
+ORDER BY overall_rank
 LIMIT 10;
 ```
 
@@ -171,13 +186,12 @@ LIMIT 10;
 
 **SQL Query:**
 ```sql
-SELECT fr.scheme_name, fr.overall_rank, fr.composite_score,
-       fr.annualized_return_3y, bd.lock_in_period, bd.minimum_amount
-FROM fund_rankings fr
-JOIN schemes s ON fr.scheme_id = s.id
-JOIN bse_details bd ON s.id = bd.scheme_id
-WHERE s.amfi_sub = 'ELSS' OR s.scheme_name LIKE '%ELSS%'
-ORDER BY fr.overall_rank
+SELECT scheme_name, overall_rank, composite_score,
+       annualized_return_3y, annualized_return_5y, aum_cr,
+       pillar_1_score, pillar_2_score, sharpe_ratio_3y
+FROM fund_rankings 
+WHERE amfi_sub = 'ELSS'
+ORDER BY overall_rank
 LIMIT 10;
 ```
 
@@ -186,13 +200,12 @@ LIMIT 10;
 
 **SQL Query:**
 ```sql
-SELECT fr.scheme_name, fr.overall_rank, fr.composite_score,
-       fr.annualized_return_1y, bd.minimum_amount, bd.exit_load
-FROM fund_rankings fr
-JOIN schemes s ON fr.scheme_id = s.id
-JOIN bse_details bd ON s.id = bd.scheme_id
-WHERE s.amfi_sub = 'Liquid Fund'
-ORDER BY fr.overall_rank
+SELECT scheme_name, overall_rank, composite_score,
+       annualized_return_1y, point_to_point_return_1y, aum_cr,
+       pillar_1_score, pillar_2_score, pillar_3_score
+FROM fund_rankings 
+WHERE amfi_sub = 'Liquid Fund'
+ORDER BY overall_rank
 LIMIT 10;
 ```
 
@@ -214,15 +227,16 @@ LIMIT 15;
 
 **SQL Query:**
 ```sql
-SELECT fr.scheme_name, fr.overall_rank, fr.composite_score,
-       fr.annualized_return_3y, fr.annualized_volatility_3y
-FROM fund_rankings fr
-JOIN schemes s ON fr.scheme_id = s.id
-WHERE s.scheme_name LIKE '%International%' 
-    OR s.scheme_name LIKE '%Global%'
-    OR s.scheme_name LIKE '%US%'
-    OR s.scheme_name LIKE '%World%'
-ORDER BY fr.overall_rank
+SELECT scheme_name, overall_rank, composite_score,
+       annualized_return_3y, annualized_volatility_3y, aum_cr,
+       pillar_1_score, pillar_2_score
+FROM fund_rankings 
+WHERE amfi_sub = 'FoFs Overseas'
+    OR scheme_name ILIKE '%Global%'
+    OR scheme_name ILIKE '%International%'
+    OR scheme_name ILIKE '%Overseas%'
+    OR scheme_name ILIKE '%China%'
+ORDER BY overall_rank
 LIMIT 10;
 ```
 
@@ -231,15 +245,14 @@ LIMIT 10;
 
 **SQL Query:**
 ```sql
-SELECT s.scheme_name, s.amfi_broad, fr.overall_rank, fr.composite_score,
-       bd.minimum_amount, fr.avg_3y_rolling_return
-FROM schemes s
-JOIN fund_rankings fr ON s.id = fr.scheme_id
-JOIN bse_details bd ON s.id = bd.scheme_id
-WHERE bd.sip_allowed = true 
-    AND fr.avg_3y_rolling_return > 10
-    AND bd.minimum_amount <= 1000
-ORDER BY fr.overall_rank
+SELECT scheme_name, amfi_broad, overall_rank, composite_score,
+       avg_3y_rolling_return, annualized_return_3y, aum_cr,
+       pillar_1_score, pillar_2_score
+FROM fund_rankings 
+WHERE avg_3y_rolling_return > 10
+    AND overall_rank <= 100
+    AND amfi_broad IN ('Equity', 'Hybrid')
+ORDER BY overall_rank
 LIMIT 15;
 ```
 
@@ -248,16 +261,16 @@ LIMIT 15;
 
 **SQL Query:**
 ```sql
-SELECT fr.scheme_name, fr.overall_rank, fr.composite_score,
-       fr.annualized_return_3y, fr.annualized_volatility_3y
-FROM fund_rankings fr
-JOIN schemes s ON fr.scheme_id = s.id
-WHERE s.amfi_sub LIKE '%Sector%' 
-    OR s.amfi_sub LIKE '%Thematic%'
-    OR s.scheme_name LIKE '%Banking%'
-    OR s.scheme_name LIKE '%Technology%'
-    OR s.scheme_name LIKE '%Pharma%'
-ORDER BY fr.overall_rank
+SELECT scheme_name, overall_rank, composite_score,
+       annualized_return_3y, annualized_volatility_3y, aum_cr,
+       pillar_1_score, pillar_2_score
+FROM fund_rankings 
+WHERE amfi_sub = 'Sectoral / Thematic'
+    OR scheme_name LIKE '%Banking%'
+    OR scheme_name LIKE '%Technology%'
+    OR scheme_name LIKE '%Pharma%'
+    OR scheme_name LIKE '%Infrastructure%'
+ORDER BY overall_rank
 LIMIT 10;
 ```
 
@@ -279,14 +292,14 @@ LIMIT 15;
 
 **SQL Query:**
 ```sql
-SELECT fr.scheme_name, fr.overall_rank, fr.composite_score,
-       fr.annualized_return_3y, fr.maximum_drawdown_5y
-FROM fund_rankings fr
-JOIN schemes s ON fr.scheme_id = s.id
-WHERE s.amfi_sub LIKE '%Balanced Advantage%' 
-    OR s.amfi_sub LIKE '%Dynamic%'
-    OR s.scheme_name LIKE '%Balanced Advantage%'
-ORDER BY fr.overall_rank
+SELECT scheme_name, overall_rank, composite_score,
+       annualized_return_3y, maximum_drawdown_5y, aum_cr,
+       pillar_1_score, pillar_2_score
+FROM fund_rankings 
+WHERE amfi_sub = 'Dynamic Asset Allocation or Balanced Advantage'
+    OR scheme_name LIKE '%Balanced Advantage%'
+    OR scheme_name LIKE '%Dynamic%'
+ORDER BY overall_rank
 LIMIT 10;
 ```
 
@@ -342,13 +355,13 @@ LIMIT 15;
 
 **SQL Query:**
 ```sql
-SELECT fr.scheme_name, fr.overall_rank, fr.composite_score,
-       fr.annualized_return_3y, fr.annualized_volatility_3y
-FROM fund_rankings fr
-JOIN schemes s ON fr.scheme_id = s.id
-WHERE s.amfi_sub LIKE '%Credit Risk%'
-    OR s.scheme_name LIKE '%Credit Risk%'
-ORDER BY fr.overall_rank
+SELECT scheme_name, overall_rank, composite_score,
+       annualized_return_3y, annualized_volatility_3y, aum_cr,
+       pillar_1_score, pillar_2_score
+FROM fund_rankings 
+WHERE amfi_sub = 'Credit Risk Fund'
+    OR scheme_name LIKE '%Credit Risk%'
+ORDER BY overall_rank
 LIMIT 10;
 ```
 
@@ -370,13 +383,12 @@ LIMIT 15;
 
 **SQL Query:**
 ```sql
-SELECT s.scheme_name, s.amfi_broad, s.aum_in_lakhs,
-       fr.overall_rank, fr.composite_score,
-       ROUND(s.aum_in_lakhs/100000, 2) as aum_crores
-FROM schemes s
-LEFT JOIN fund_rankings fr ON s.id = fr.scheme_id
-WHERE s.aum_in_lakhs > 500000  -- Above 5000 crores
-ORDER BY s.aum_in_lakhs DESC
+SELECT scheme_name, amfi_broad, aum_cr,
+       overall_rank, composite_score,
+       pillar_1_score, pillar_2_score
+FROM fund_rankings
+WHERE aum_cr > 5000  -- Above 5000 crores
+ORDER BY aum_cr DESC
 LIMIT 15;
 ```
 

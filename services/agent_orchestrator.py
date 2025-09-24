@@ -155,7 +155,7 @@ class AgentOrchestrator:
                 }
             
             # Execute query through the SQL agent
-            response = sql_agent.process_query(query, session_id)
+            response = await sql_agent.process_query(query, session_id)
             
             return response
             
